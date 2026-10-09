@@ -1455,3 +1455,20 @@ Cuando encuentres un problema, investiga la causa y aplica la solución apropiad
 **La prioridad es entregar una aplicación real, segura, coherente y mantenible, no simplemente una interfaz que parezca funcionar.**
 
 No inventes recursos, credenciales, resultados de pruebas ni despliegues. Protege la información existente, evita operaciones destructivas sin autorización y conserva la integridad histórica de las ventas y el inventario.
+
+
+### Uso obligatorio de skills y herramientas de desarrollo
+
+Antes de implementar cada módulo, identifica y utiliza las skills disponibles que correspondan a la tarea. No asumas que una skill está instalada: verifica su disponibilidad y, si falta, informa al usuario o solicita su instalación.
+
+* **Base de datos:** aplicar Supabase Postgres Best Practices antes de diseñar tablas, crear migraciones, modificar índices, escribir consultas o revisar problemas de rendimiento.
+* **Frontend:** aplicar las recomendaciones de rendimiento del framework elegido y las guías de diseño y accesibilidad pertinentes.
+* **Seguridad:** revisar autenticación, autorización, validación, sesiones, cookies y protección de los endpoints antes de considerar terminado un módulo.
+* **Pruebas:** crear y ejecutar pruebas unitarias e integrales, y pruebas de navegador para los flujos principales.
+* **Rendimiento:** medir los tiempos de respuesta con el backend ya iniciado, utilizando datos de prueba representativos. No confundir el tiempo de arranque del hosting con la velocidad durante el uso.
+* **Infraestructura:** utilizar los MCP o las herramientas oficiales disponibles para verificar la configuración y los despliegues reales.
+
+No instales dependencias, skills ni MCP innecesarios. Comprueba su compatibilidad con el stack elegido y evita duplicar herramientas que ya cumplen la misma función.
+
+Antes de declarar terminado un módulo, informa qué pruebas se ejecutaron, cuáles pasaron, cuáles fallaron y qué limitaciones quedan pendientes. No afirmes haber ejecutado pruebas, consultado servicios o realizado despliegues que no hayas verificado.
+
