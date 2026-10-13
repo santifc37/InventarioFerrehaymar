@@ -76,4 +76,28 @@ Entidades principales necesarias para cubrir el alcance:
 
 ## 8. Estado inicial
 
+
 El repositorio ya contiene este README y estructura base (`.agents`, `.atl`, `skills-lock.json`). A partir de aquí partimos **solo con las bases** para construir fase a fase, sin asumir código previo de la aplicación.
+
+
+
+### Monorepo y despliegue centralizado
+
+Todo el proyecto debe mantenerse en un único repositorio Git y una carpeta raíz. Organiza el frontend, el backend y los recursos de base de datos en directorios separados, con configuraciones independientes.
+
+OpenCode debe poder trabajar desde la raíz del repositorio y disponer de instrucciones y scripts documentados para:
+
+1. Instalar las dependencias y ejecutar localmente el frontend y el backend.
+2. Ejecutar las pruebas de cada componente y las pruebas de integración.
+3. Validar las migraciones de Supabase antes de aplicarlas.
+4. Desplegar el frontend en Vercel y el backend en Render.
+5. Aplicar las migraciones de Supabase mediante las herramientas oficiales disponibles.
+6. Verificar el resultado de cada despliegue y comprobar que los servicios se comunican correctamente.
+
+Usa las integraciones MCP existentes cuando sean apropiadas y, en su defecto, las CLI oficiales. No des por hecho que un MCP tiene permisos de escritura ni que un despliegue terminó correctamente sin verificarlo.
+
+Documenta los comandos para desarrollo, pruebas y despliegue, así como las variables de entorno necesarias para cada servicio. Mantén las credenciales fuera del repositorio y separa claramente desarrollo y producción.
+
+Los despliegues de producción deben requerir confirmación antes de ejecutar cambios destructivos o migraciones que puedan comprometer datos existentes. El proceso debe ser reproducible y permitir identificar qué versión está desplegada en cada servicio.
+
+
