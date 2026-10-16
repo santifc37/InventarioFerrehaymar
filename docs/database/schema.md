@@ -1,1216 +1,294 @@
--- ============================================================
--- INVENTARIO FERREHAYMAR
--- PostgreSQL / Supabase
--- Esquema inicial con seguridad RLS
---
--- Arquitectura:
--- Navegador -> Render (backend) -> Supabase
---
--- El navegador NO accede directamente a las tablas.
--- Render conserva SUPABASE_SERVICE_ROLE_KEY en sus variables
--- de entorno. Nunca se expone esta clave al frontend.
---
--- IMPORTANTE:
--- - Stock calculado desde movimientos_inventario.
--- - Movimientos y detalles de venta inmutables.
--- - Entradas, ajustes y ventas generan movimientos automáticos.
--- - Cantidades con hasta 3 decimales.
--- - Precio y costo histórico guardados por ítem.
--- ============================================================
-
-BEGIN;
-
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
--- ============================================================
--- 1. CATEGORÍAS
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS public.categorias (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    nombre VARCHAR(100) NOT NULL,
-    descripcion TEXT,
-    activo BOOLEAN NOT NULL DEFAULT TRUE,
-    creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    CONSTRAINT categorias_nombre_no_vacio
-        CHECK (length(trim(nombre)) > 0)
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS categorias_nombre_unico
-    ON public.categorias (lower(trim(nombre)));
-
-
--- ============================================================
--- 2. UNIDADES
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS public.unidades (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    codigo VARCHAR(20) NOT NULL,
-    nombre VARCHAR(100) NOT NULL,
-    fraccionable BOOLEAN NOT NULL DEFAULT TRUE,
-    creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    CONSTRAINT unidades_codigo_no_vacio
-        CHECK (length(trim(codigo)) > 0),
-
-    CONSTRAINT unidades_nombre_no_vacio
-        CHECK (length(trim(nombre)) > 0)
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS unidades_codigo_unico
-    ON public.unidades (lower(trim(codigo)));
-
-INSERT INTO public.unidades (codigo, nombre, fraccionable)
-VALUES
-    ('u', 'Unidad', FALSE),
-    ('m', 'Metro', TRUE),
-    ('cm', 'Centímetro', TRUE),
-    ('mm', 'Milímetro', TRUE),
-    ('kg', 'Kilogramo', TRUE),
-    ('g', 'Gramo', TRUE),
-    ('lb', 'Libra', TRUE),
-    ('l', 'Litro', TRUE),
-    ('ml', 'Mililitro', TRUE),
-    ('gal', 'Galón', TRUE),
-    ('caja', 'Caja', TRUE),
-    ('paquete', 'Paquete', TRUE),
-    ('docena', 'Docena', TRUE),
-    ('par', 'Par', TRUE)
-ON CONFLICT DO NOTHING;
-
-
--- ============================================================
--- 3. PRODUCTOS
--- El stock NO se almacena aquí.
--- Se calcula desde movimientos_inventario.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS public.productos (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    codigo VARCHAR(50) NOT NULL,
-    codigo_barras VARCHAR(100),
-    nombre VARCHAR(200) NOT NULL,
-    descripcion TEXT,
-
-    categoria_id UUID NOT NULL
-        REFERENCES public.categorias(id) ON DELETE RESTRICT,
-
-    unidad_base_id UUID NOT NULL
-        REFERENCES public.unidades(id) ON DELETE RESTRICT,
-
-    precio_compra NUMERIC(12,2) NOT NULL DEFAULT 0,
-    precio_venta NUMERIC(12,2) NOT NULL DEFAULT 0,
-    stock_minimo NUMERIC(12,3) NOT NULL DEFAULT 0,
-
-    activo BOOLEAN NOT NULL DEFAULT TRUE,
-    creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    actualizado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    CONSTRAINT productos_codigo_no_vacio
-        CHECK (length(trim(codigo)) > 0),
-
-    CONSTRAINT productos_nombre_no_vacio
-        CHECK (length(trim(nombre)) > 0),
-
-    CONSTRAINT productos_precio_compra_valido
-        CHECK (precio_compra >= 0),
-
-    CONSTRAINT productos_precio_venta_valido
-        CHECK (precio_venta >= 0),
-
-    CONSTRAINT productos_stock_minimo_valido
-        CHECK (stock_minimo >= 0)
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS productos_codigo_unico
-    ON public.productos (lower(trim(codigo)));
-
-CREATE UNIQUE INDEX IF NOT EXISTS productos_barras_unico
-    ON public.productos (codigo_barras)
-    WHERE codigo_barras IS NOT NULL
-      AND length(trim(codigo_barras)) > 0;
-
-CREATE INDEX IF NOT EXISTS productos_nombre_idx
-    ON public.productos (lower(nombre));
-
-CREATE INDEX IF NOT EXISTS productos_categoria_idx
-    ON public.productos (categoria_id);
-
-CREATE INDEX IF NOT EXISTS productos_activo_idx
-    ON public.productos (activo);
-
-
--- ============================================================
--- 4. CONVERSIONES DE UNIDADES
---
--- factor_conversion:
--- cantidad en unidad origen * factor = cantidad en unidad destino.
---
--- Para registrar una venta o ajuste en una unidad diferente
--- de la base, debe existir una conversión hacia la unidad base.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS public.conversiones_unidades (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    producto_id UUID NOT NULL
-        REFERENCES public.productos(id) ON DELETE RESTRICT,
-
-    unidad_origen_id UUID NOT NULL
-        REFERENCES public.unidades(id) ON DELETE RESTRICT,
-
-    unidad_destino_id UUID NOT NULL
-        REFERENCES public.unidades(id) ON DELETE RESTRICT,
-
-    factor_conversion NUMERIC(14,6) NOT NULL,
-    activo BOOLEAN NOT NULL DEFAULT TRUE,
-    creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    CONSTRAINT conversion_factor_positivo
-        CHECK (factor_conversion > 0),
-
-    CONSTRAINT conversion_unidades_diferentes
-        CHECK (unidad_origen_id <> unidad_destino_id),
-
-    CONSTRAINT conversion_unica
-        UNIQUE (producto_id, unidad_origen_id, unidad_destino_id)
-);
-
-CREATE INDEX IF NOT EXISTS conversiones_producto_idx
-    ON public.conversiones_unidades (producto_id);
-
-
--- ============================================================
--- 5. VENTAS
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS public.ventas (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    fecha_venta DATE NOT NULL DEFAULT CURRENT_DATE,
-    fecha_registro TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    total NUMERIC(12,2) NOT NULL DEFAULT 0,
-    observaciones TEXT,
-
-    estado VARCHAR(10) NOT NULL DEFAULT 'registrada',
-
-    -- Si esta venta fue corregida, apunta a la venta nueva.
-    corregida_por_venta_id UUID
-        REFERENCES public.ventas(id) ON DELETE RESTRICT,
-
-    usuario_registro VARCHAR(100),
-    motivo_correccion VARCHAR(200),
-
-    creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    actualizado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    CONSTRAINT ventas_estado_valido
-        CHECK (estado IN ('registrada', 'corregida', 'anulada')),
-
-    CONSTRAINT ventas_total_no_negativo
-        CHECK (total >= 0),
-
-    CONSTRAINT ventas_motivo_correccion_requerido
-        CHECK (
-            estado <> 'corregida'
-            OR (
-                motivo_correccion IS NOT NULL
-                AND length(trim(motivo_correccion)) > 0
-            )
-        )
-);
-
-CREATE INDEX IF NOT EXISTS ventas_fecha_idx
-    ON public.ventas (fecha_venta DESC);
-
-CREATE INDEX IF NOT EXISTS ventas_fecha_registro_idx
-    ON public.ventas (fecha_registro DESC);
-
-CREATE INDEX IF NOT EXISTS ventas_estado_idx
-    ON public.ventas (estado);
-
-
--- ============================================================
--- 6. DETALLES DE VENTAS
--- precio_unitario: precio en la unidad en que se vendió.
--- costo_unitario_base: costo histórico de una unidad base.
--- factor_conversion: unidad vendida -> unidad base.
--- cantidad_base: cantidad convertida a unidad base.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS public.venta_items (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    venta_id UUID NOT NULL
-        REFERENCES public.ventas(id) ON DELETE RESTRICT,
-
-    producto_id UUID NOT NULL
-        REFERENCES public.productos(id) ON DELETE RESTRICT,
-
-    cantidad NUMERIC(12,3) NOT NULL,
-
-    unidad_id UUID NOT NULL
-        REFERENCES public.unidades(id) ON DELETE RESTRICT,
-
-    factor_conversion NUMERIC(14,6) NOT NULL DEFAULT 1,
-    cantidad_base NUMERIC(12,3) NOT NULL DEFAULT 0,
-
-    precio_unitario NUMERIC(12,2) NOT NULL,
-    costo_unitario_base NUMERIC(12,2) NOT NULL DEFAULT 0,
-
-    subtotal NUMERIC(12,2)
-        GENERATED ALWAYS AS (
-            ROUND(cantidad * precio_unitario, 2)
-        ) STORED,
-
-    utilidad_estimada NUMERIC(12,2)
-        GENERATED ALWAYS AS (
-            ROUND(
-                (cantidad * precio_unitario)
-                - (cantidad * factor_conversion * costo_unitario_base),
-                2
-            )
-        ) STORED,
-
-    nombre_producto_snapshot VARCHAR(200) NOT NULL DEFAULT '',
-    codigo_producto_snapshot VARCHAR(50) NOT NULL DEFAULT '',
-
-    creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    CONSTRAINT venta_items_cantidad_positiva
-        CHECK (cantidad > 0),
-
-    CONSTRAINT venta_items_factor_positivo
-        CHECK (factor_conversion > 0),
-
-    CONSTRAINT venta_items_cantidad_base_positiva
-        CHECK (cantidad_base > 0),
-
-    CONSTRAINT venta_items_precio_valido
-        CHECK (precio_unitario >= 0),
-
-    CONSTRAINT venta_items_costo_valido
-        CHECK (costo_unitario_base >= 0)
-);
-
-CREATE INDEX IF NOT EXISTS venta_items_venta_idx
-    ON public.venta_items (venta_id);
-
-CREATE INDEX IF NOT EXISTS venta_items_producto_idx
-    ON public.venta_items (producto_id);
-
-
--- ============================================================
--- 7. CABECERAS DE ENTRADAS Y AJUSTES
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS public.ajustes_entradas (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    tipo VARCHAR(10) NOT NULL,
-    fecha DATE NOT NULL DEFAULT CURRENT_DATE,
-    observaciones TEXT,
-
-    motivo VARCHAR(200) NOT NULL,
-    usuario_actor VARCHAR(100) NOT NULL,
-
-    creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    CONSTRAINT ajustes_tipo_valido
-        CHECK (tipo IN ('entrada', 'ajuste')),
-
-    CONSTRAINT ajustes_motivo_obligatorio
-        CHECK (length(trim(motivo)) > 0),
-
-    CONSTRAINT ajustes_actor_obligatorio
-        CHECK (length(trim(usuario_actor)) > 0)
-);
-
-CREATE INDEX IF NOT EXISTS ajustes_entradas_fecha_idx
-    ON public.ajustes_entradas (fecha DESC);
-
-
--- ============================================================
--- 8. DETALLES DE ENTRADAS Y AJUSTES
---
--- cantidad es positiva para entradas.
--- En ajustes, cantidad puede ser positiva o negativa.
--- cantidad_base se calcula en el trigger según la conversión.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS public.ajuste_entrada_items (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    ajuste_entrada_id UUID NOT NULL
-        REFERENCES public.ajustes_entradas(id) ON DELETE RESTRICT,
-
-    producto_id UUID NOT NULL
-        REFERENCES public.productos(id) ON DELETE RESTRICT,
-
-    cantidad NUMERIC(12,3) NOT NULL,
-
-    unidad_id UUID NOT NULL
-        REFERENCES public.unidades(id) ON DELETE RESTRICT,
-
-    factor_conversion NUMERIC(14,6) NOT NULL DEFAULT 1,
-    cantidad_base NUMERIC(12,3) NOT NULL DEFAULT 0,
-
-    creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    CONSTRAINT ajuste_items_cantidad_no_cero
-        CHECK (cantidad <> 0),
-
-    CONSTRAINT ajuste_items_factor_positivo
-        CHECK (factor_conversion > 0),
-
-    CONSTRAINT ajuste_items_base_no_cero
-        CHECK (cantidad_base <> 0)
-);
-
-CREATE INDEX IF NOT EXISTS ajuste_items_cabecera_idx
-    ON public.ajuste_entrada_items (ajuste_entrada_id);
-
-CREATE INDEX IF NOT EXISTS ajuste_items_producto_idx
-    ON public.ajuste_entrada_items (producto_id);
-
-
--- ============================================================
--- 9. MOVIMIENTOS DE INVENTARIO
---
--- cantidad_base positiva = entrada al stock.
--- cantidad_base negativa = salida del stock.
---
--- referencia_id es polimórfico: puede referenciar una venta,
--- una cabecera de ajuste/entrada u otra operación.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS public.movimientos_inventario (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    producto_id UUID NOT NULL
-        REFERENCES public.productos(id) ON DELETE RESTRICT,
-
-    tipo VARCHAR(20) NOT NULL,
-
-    cantidad_base NUMERIC(12,3) NOT NULL,
-
-    unidad_id UUID NOT NULL
-        REFERENCES public.unidades(id) ON DELETE RESTRICT,
-
-    cantidad_original NUMERIC(12,3) NOT NULL,
-
-    referencia_tipo VARCHAR(20),
-    referencia_id UUID,
-
-    motivo VARCHAR(200),
-    usuario_actor VARCHAR(100),
-
-    costo_unitario_base NUMERIC(12,2),
-
-    fecha TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    hash_trazabilidad VARCHAR(64),
-
-    CONSTRAINT movimientos_tipo_valido
-        CHECK (
-            tipo IN (
-                'entrada',
-                'salida',
-                'ajuste',
-                'venta',
-                'correccion_venta'
-            )
-        ),
-
-    CONSTRAINT movimientos_cantidad_base_no_cero
-        CHECK (cantidad_base <> 0),
-
-    CONSTRAINT movimientos_cantidad_original_no_cero
-        CHECK (cantidad_original <> 0),
-
-    CONSTRAINT movimientos_referencia_tipo_valido
-        CHECK (
-            referencia_tipo IS NULL
-            OR referencia_tipo IN (
-                'venta',
-                'ajuste_entrada',
-                'correccion',
-                'import'
-            )
-        ),
-
-    CONSTRAINT movimientos_costo_valido
-        CHECK (
-            costo_unitario_base IS NULL
-            OR costo_unitario_base >= 0
-        ),
-
-    CONSTRAINT movimientos_motivo_justificado
-        CHECK (
-            tipo IN ('venta', 'correccion_venta')
-            OR (
-                motivo IS NOT NULL
-                AND length(trim(motivo)) > 0
-            )
-        )
-);
-
-CREATE INDEX IF NOT EXISTS movimientos_producto_fecha_idx
-    ON public.movimientos_inventario (producto_id, fecha DESC);
-
-CREATE INDEX IF NOT EXISTS movimientos_referencia_idx
-    ON public.movimientos_inventario (referencia_tipo, referencia_id);
-
-CREATE INDEX IF NOT EXISTS movimientos_tipo_fecha_idx
-    ON public.movimientos_inventario (tipo, fecha DESC);
-
-
--- ============================================================
--- FUNCIONES AUXILIARES
--- ============================================================
-
-CREATE OR REPLACE FUNCTION public.actualizar_fecha_modificacion()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SET search_path = public
-AS $$
-BEGIN
-    NEW.actualizado_en := NOW();
-    RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS productos_actualizado_en
-    ON public.productos;
-
-CREATE TRIGGER productos_actualizado_en
-BEFORE UPDATE ON public.productos
-FOR EACH ROW
-EXECUTE FUNCTION public.actualizar_fecha_modificacion();
-
-DROP TRIGGER IF EXISTS ventas_actualizado_en
-    ON public.ventas;
-
-CREATE TRIGGER ventas_actualizado_en
-BEFORE UPDATE ON public.ventas
-FOR EACH ROW
-EXECUTE FUNCTION public.actualizar_fecha_modificacion();
-
-
--- ============================================================
--- VALIDAR CONVERSIÓN A UNIDAD BASE
--- ============================================================
-
-CREATE OR REPLACE FUNCTION public.obtener_factor_base(
-    p_producto_id UUID,
-    p_unidad_id UUID
-)
-RETURNS NUMERIC
-LANGUAGE plpgsql
-STABLE
-SET search_path = public
-AS $$
-DECLARE
-    v_unidad_base UUID;
-    v_factor NUMERIC(14,6);
-BEGIN
-    SELECT unidad_base_id
-    INTO v_unidad_base
-    FROM public.productos
-    WHERE id = p_producto_id;
-
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'El producto no existe.';
-    END IF;
-
-    IF p_unidad_id = v_unidad_base THEN
-        RETURN 1;
-    END IF;
-
-    SELECT factor_conversion
-    INTO v_factor
-    FROM public.conversiones_unidades
-    WHERE producto_id = p_producto_id
-      AND unidad_origen_id = p_unidad_id
-      AND unidad_destino_id = v_unidad_base
-      AND activo = TRUE;
-
-    IF v_factor IS NULL THEN
-        RAISE EXCEPTION
-            'No existe una conversión activa desde la unidad indicada a la unidad base del producto.';
-    END IF;
-
-    RETURN v_factor;
-END;
-$$;
-
-
--- ============================================================
--- PREPARAR ÍTEM DE VENTA
--- El backend debe crear la cabecera de venta y sus ítems
--- dentro de una misma transacción.
--- ============================================================
-
-CREATE OR REPLACE FUNCTION public.preparar_venta_item()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SET search_path = public
-AS $$
-DECLARE
-    v_producto public.productos%ROWTYPE;
-    v_estado VARCHAR(10);
-BEGIN
-    SELECT estado
-    INTO v_estado
-    FROM public.ventas
-    WHERE id = NEW.venta_id
-    FOR UPDATE;
-
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'La venta no existe.';
-    END IF;
-
-    IF v_estado <> 'registrada' THEN
-        RAISE EXCEPTION 'No se pueden agregar ítems a una venta no registrada.';
-    END IF;
-
-    SELECT *
-    INTO v_producto
-    FROM public.productos
-    WHERE id = NEW.producto_id
-    FOR UPDATE;
-
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'El producto no existe.';
-    END IF;
-
-    IF NOT v_producto.activo THEN
-        RAISE EXCEPTION 'No se puede vender un producto inactivo.';
-    END IF;
-
-    IF NEW.cantidad <= 0 THEN
-        RAISE EXCEPTION 'La cantidad vendida debe ser positiva.';
-    END IF;
-
-    NEW.factor_conversion :=
-        public.obtener_factor_base(NEW.producto_id, NEW.unidad_id);
-
-    NEW.cantidad_base :=
-        ROUND(NEW.cantidad * NEW.factor_conversion, 3);
-
-    IF NEW.cantidad_base <= 0 THEN
-        RAISE EXCEPTION 'La cantidad convertida debe ser positiva.';
-    END IF;
-
-    -- Conserva el precio recibido del backend si fue editado.
-    -- Si el backend no lo envía, utiliza el precio de referencia.
-    IF NEW.precio_unitario IS NULL THEN
-        NEW.precio_unitario :=
-            ROUND(v_producto.precio_venta * NEW.factor_conversion, 2);
-    END IF;
-
-    NEW.costo_unitario_base := v_producto.precio_compra;
-    NEW.nombre_producto_snapshot := v_producto.nombre;
-    NEW.codigo_producto_snapshot := v_producto.codigo;
-
-    RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS venta_items_preparar
-    ON public.venta_items;
-
-CREATE TRIGGER venta_items_preparar
-BEFORE INSERT ON public.venta_items
-FOR EACH ROW
-EXECUTE FUNCTION public.preparar_venta_item();
-
-
--- ============================================================
--- TOTAL DE VENTA
--- ============================================================
-
-CREATE OR REPLACE FUNCTION public.recalcular_total_venta()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SET search_path = public
-AS $$
-BEGIN
-    UPDATE public.ventas
-    SET total = COALESCE(
-        (
-            SELECT SUM(subtotal)
-            FROM public.venta_items
-            WHERE venta_id = NEW.venta_id
-        ),
-        0
-    )
-    WHERE id = NEW.venta_id;
-
-    RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS venta_items_recalcular_total
-    ON public.venta_items;
-
-CREATE TRIGGER venta_items_recalcular_total
-AFTER INSERT ON public.venta_items
-FOR EACH ROW
-EXECUTE FUNCTION public.recalcular_total_venta();
-
-
--- ============================================================
--- GENERAR MOVIMIENTO POR CADA ÍTEM VENDIDO
--- ============================================================
-
-CREATE OR REPLACE FUNCTION public.generar_movimiento_venta()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SET search_path = public
-AS $$
-DECLARE
-    v_actor VARCHAR(100);
-BEGIN
-    SELECT usuario_registro
-    INTO v_actor
-    FROM public.ventas
-    WHERE id = NEW.venta_id;
-
-    INSERT INTO public.movimientos_inventario (
-        producto_id,
-        tipo,
-        cantidad_base,
-        unidad_id,
-        cantidad_original,
-        referencia_tipo,
-        referencia_id,
-        motivo,
-        usuario_actor,
-        costo_unitario_base
-    )
-    VALUES (
-        NEW.producto_id,
-        'venta',
-        -NEW.cantidad_base,
-        NEW.unidad_id,
-        NEW.cantidad,
-        'venta',
-        NEW.venta_id,
-        'Salida por venta',
-        COALESCE(v_actor, 'vendedor'),
-        NEW.costo_unitario_base
-    );
-
-    RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS venta_items_generar_movimiento
-    ON public.venta_items;
-
-CREATE TRIGGER venta_items_generar_movimiento
-AFTER INSERT ON public.venta_items
-FOR EACH ROW
-EXECUTE FUNCTION public.generar_movimiento_venta();
-
-
--- ============================================================
--- PREPARAR ÍTEM DE ENTRADA / AJUSTE
--- Para entrada: cantidad positiva.
--- Para ajuste: cantidad positiva o negativa.
--- ============================================================
-
-CREATE OR REPLACE FUNCTION public.preparar_ajuste_item()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SET search_path = public
-AS $$
-DECLARE
-    v_tipo VARCHAR(10);
-BEGIN
-    SELECT tipo
-    INTO v_tipo
-    FROM public.ajustes_entradas
-    WHERE id = NEW.ajuste_entrada_id
-    FOR UPDATE;
-
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'La cabecera de entrada/ajuste no existe.';
-    END IF;
-
-    IF v_tipo = 'entrada' AND NEW.cantidad <= 0 THEN
-        RAISE EXCEPTION 'Una entrada debe tener cantidad positiva.';
-    END IF;
-
-    IF v_tipo = 'ajuste' AND NEW.cantidad = 0 THEN
-        RAISE EXCEPTION 'Un ajuste no puede tener cantidad cero.';
-    END IF;
-
-    NEW.factor_conversion :=
-        public.obtener_factor_base(NEW.producto_id, NEW.unidad_id);
-
-    NEW.cantidad_base :=
-        ROUND(NEW.cantidad * NEW.factor_conversion, 3);
-
-    IF NEW.cantidad_base = 0 THEN
-        RAISE EXCEPTION 'La cantidad convertida no puede ser cero.';
-    END IF;
-
-    RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS ajuste_items_preparar
-    ON public.ajuste_entrada_items;
-
-CREATE TRIGGER ajuste_items_preparar
-BEFORE INSERT ON public.ajuste_entrada_items
-FOR EACH ROW
-EXECUTE FUNCTION public.preparar_ajuste_item();
-
-
--- ============================================================
--- GENERAR MOVIMIENTO POR CADA ÍTEM DE ENTRADA / AJUSTE
--- ============================================================
-
-CREATE OR REPLACE FUNCTION public.generar_movimiento_ajuste()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SET search_path = public
-AS $$
-DECLARE
-    v_cabecera public.ajustes_entradas%ROWTYPE;
-    v_tipo_movimiento VARCHAR(20);
-BEGIN
-    SELECT *
-    INTO v_cabecera
-    FROM public.ajustes_entradas
-    WHERE id = NEW.ajuste_entrada_id;
-
-    IF v_cabecera.tipo = 'entrada' THEN
-        v_tipo_movimiento := 'entrada';
-    ELSE
-        v_tipo_movimiento := 'ajuste';
-    END IF;
-
-    INSERT INTO public.movimientos_inventario (
-        producto_id,
-        tipo,
-        cantidad_base,
-        unidad_id,
-        cantidad_original,
-        referencia_tipo,
-        referencia_id,
-        motivo,
-        usuario_actor
-    )
-    VALUES (
-        NEW.producto_id,
-        v_tipo_movimiento,
-        NEW.cantidad_base,
-        NEW.unidad_id,
-        NEW.cantidad,
-        'ajuste_entrada',
-        NEW.ajuste_entrada_id,
-        v_cabecera.motivo,
-        v_cabecera.usuario_actor
-    );
-
-    RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS ajuste_items_generar_movimiento
-    ON public.ajuste_entrada_items;
-
-CREATE TRIGGER ajuste_items_generar_movimiento
-AFTER INSERT ON public.ajuste_entrada_items
-FOR EACH ROW
-EXECUTE FUNCTION public.generar_movimiento_ajuste();
-
-
--- ============================================================
--- INMUTABILIDAD
--- Los movimientos no se editan ni eliminan.
--- Los ítems de venta tampoco se editan ni eliminan.
--- ============================================================
-
-CREATE OR REPLACE FUNCTION public.impedir_modificacion_historica()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SET search_path = public
-AS $$
-BEGIN
-    RAISE EXCEPTION
-        'Este registro es histórico e inmutable. Registre una operación compensatoria.';
-END;
-$$;
-
-DROP TRIGGER IF EXISTS movimientos_inmutables
-    ON public.movimientos_inventario;
-
-CREATE TRIGGER movimientos_inmutables
-BEFORE UPDATE OR DELETE ON public.movimientos_inventario
-FOR EACH ROW
-EXECUTE FUNCTION public.impedir_modificacion_historica();
-
-DROP TRIGGER IF EXISTS venta_items_inmutables
-    ON public.venta_items;
-
-CREATE TRIGGER venta_items_inmutables
-BEFORE UPDATE OR DELETE ON public.venta_items
-FOR EACH ROW
-EXECUTE FUNCTION public.impedir_modificacion_historica();
-
-DROP TRIGGER IF EXISTS ajuste_items_inmutables
-    ON public.ajuste_entrada_items;
-
-CREATE TRIGGER ajuste_items_inmutables
-BEFORE UPDATE OR DELETE ON public.ajuste_entrada_items
-FOR EACH ROW
-EXECUTE FUNCTION public.impedir_modificacion_historica();
-
-
--- ============================================================
--- IMPEDIR ELIMINACIÓN DE VENTAS Y CABECERAS DE AJUSTE
--- ============================================================
-
-DROP TRIGGER IF EXISTS ventas_no_eliminar
-    ON public.ventas;
-
-CREATE TRIGGER ventas_no_eliminar
-BEFORE DELETE ON public.ventas
-FOR EACH ROW
-EXECUTE FUNCTION public.impedir_modificacion_historica();
-
-DROP TRIGGER IF EXISTS ajustes_no_eliminar
-    ON public.ajustes_entradas;
-
-CREATE TRIGGER ajustes_no_eliminar
-BEFORE DELETE ON public.ajustes_entradas
-FOR EACH ROW
-EXECUTE FUNCTION public.impedir_modificacion_historica();
-
-
--- ============================================================
--- CANCELAR UNA VENTA
---
--- Esta función:
--- 1. Comprueba que exista y siga registrada.
--- 2. Registra el motivo.
--- 3. Crea movimientos compensatorios positivos.
--- 4. Marca la venta como anulada.
---
--- Debe llamarse desde el backend autorizado.
--- ============================================================
-
-CREATE OR REPLACE FUNCTION public.anular_venta(
-    p_venta_id UUID,
-    p_motivo VARCHAR(200),
-    p_usuario_actor VARCHAR(100)
-)
-RETURNS VOID
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-    v_venta public.ventas%ROWTYPE;
-    v_item RECORD;
-BEGIN
-    IF p_motivo IS NULL OR length(trim(p_motivo)) = 0 THEN
-        RAISE EXCEPTION 'Debe indicar el motivo de la anulación.';
-    END IF;
-
-    IF p_usuario_actor IS NULL
-       OR length(trim(p_usuario_actor)) = 0 THEN
-        RAISE EXCEPTION 'Debe indicar quién realiza la operación.';
-    END IF;
-
-    SELECT *
-    INTO v_venta
-    FROM public.ventas
-    WHERE id = p_venta_id
-    FOR UPDATE;
-
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'La venta no existe.';
-    END IF;
-
-    IF v_venta.estado <> 'registrada' THEN
-        RAISE EXCEPTION 'Solo se puede anular una venta registrada.';
-    END IF;
-
-    FOR v_item IN
-        SELECT *
-        FROM public.venta_items
-        WHERE venta_id = p_venta_id
-    LOOP
-        INSERT INTO public.movimientos_inventario (
-            producto_id,
-            tipo,
-            cantidad_base,
-            unidad_id,
-            cantidad_original,
-            referencia_tipo,
-            referencia_id,
-            motivo,
-            usuario_actor,
-            costo_unitario_base
-        )
-        VALUES (
-            v_item.producto_id,
-            'correccion_venta',
-            v_item.cantidad_base,
-            v_item.unidad_id,
-            v_item.cantidad,
-            'correccion',
-            p_venta_id,
-            trim(p_motivo),
-            trim(p_usuario_actor),
-            v_item.costo_unitario_base
-        );
-    END LOOP;
-
-    UPDATE public.ventas
-    SET estado = 'anulada',
-        motivo_correccion = trim(p_motivo),
-        actualizado_en = NOW()
-    WHERE id = p_venta_id;
-END;
-$$;
-
-
--- ============================================================
--- VISTA DE STOCK ACTUAL
--- El stock se calcula SIEMPRE a partir de movimientos.
--- Los productos sin movimientos aparecen con stock cero.
--- ============================================================
-
-CREATE OR REPLACE VIEW public.v_stock_actual
-WITH (security_invoker = true)
-AS
-SELECT
-    p.id AS producto_id,
-    p.codigo,
-    p.codigo_barras,
-    p.nombre,
-    p.descripcion,
-    p.categoria_id,
-    c.nombre AS categoria_nombre,
-    p.unidad_base_id,
-    u.codigo AS unidad_base_codigo,
-    u.nombre AS unidad_base_nombre,
-    p.precio_compra,
-    p.precio_venta,
-    p.stock_minimo,
-
-    COALESCE(SUM(m.cantidad_base), 0)::NUMERIC(12,3)
-        AS stock_actual,
-
-    (
-        COALESCE(SUM(m.cantidad_base), 0) <= 0
-    ) AS agotado,
-
-    (
-        COALESCE(SUM(m.cantidad_base), 0) > 0
-        AND COALESCE(SUM(m.cantidad_base), 0) <= p.stock_minimo
-    ) AS stock_bajo,
-
-    p.activo,
-    p.creado_en,
-    p.actualizado_en
-
-FROM public.productos p
-
-LEFT JOIN public.categorias c
-    ON c.id = p.categoria_id
-
-JOIN public.unidades u
-    ON u.id = p.unidad_base_id
-
-LEFT JOIN public.movimientos_inventario m
-    ON m.producto_id = p.id
-
-GROUP BY
-    p.id,
-    p.codigo,
-    p.codigo_barras,
-    p.nombre,
-    p.descripcion,
-    p.categoria_id,
-    c.nombre,
-    p.unidad_base_id,
-    u.codigo,
-    u.nombre,
-    p.precio_compra,
-    p.precio_venta,
-    p.stock_minimo,
-    p.activo,
-    p.creado_en,
-    p.actualizado_en;
-
-
--- ============================================================
--- VISTA DE VENTAS DIARIAS
--- ============================================================
-
-CREATE OR REPLACE VIEW public.v_ventas_diarias
-WITH (security_invoker = true)
-AS
-SELECT
-    v.fecha_venta,
-    COUNT(*) AS cantidad_ventas,
-    COALESCE(SUM(v.total), 0)::NUMERIC(12,2) AS total_vendido
-
-FROM public.ventas v
-
-WHERE v.estado = 'registrada'
-
-GROUP BY v.fecha_venta;
-
-
--- ============================================================
--- VISTA DE PRODUCTOS MÁS VENDIDOS
--- ============================================================
-
-CREATE OR REPLACE VIEW public.v_productos_mas_vendidos
-WITH (security_invoker = true)
-AS
-SELECT
-    vi.producto_id,
-    vi.nombre_producto_snapshot AS nombre,
-    vi.codigo_producto_snapshot AS codigo,
-
-    SUM(vi.cantidad_base)::NUMERIC(12,3)
-        AS cantidad_vendida_base,
-
-    SUM(vi.subtotal)::NUMERIC(12,2)
-        AS total_vendido,
-
-    SUM(vi.utilidad_estimada)::NUMERIC(12,2)
-        AS utilidad_estimada
-
-FROM public.venta_items vi
-
-JOIN public.ventas v
-    ON v.id = vi.venta_id
-
-WHERE v.estado = 'registrada'
-
-GROUP BY
-    vi.producto_id,
-    vi.nombre_producto_snapshot,
-    vi.codigo_producto_snapshot;
-
-
--- ============================================================
--- RLS: BLOQUEAR ACCESO DIRECTO DESDE EL NAVEGADOR
---
--- La contraseña compartida se valida en Render.
--- Supabase no recibe esa contraseña como sustituto de RLS.
---
--- No se crean políticas para anon/authenticated.
--- El backend usa service_role solo en el servidor.
--- ============================================================
-
-ALTER TABLE public.categorias ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.unidades ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.productos ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.conversiones_unidades ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.ventas ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.venta_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.ajustes_entradas ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.ajuste_entrada_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.movimientos_inventario ENABLE ROW LEVEL SECURITY;
-
--- Retirar privilegios directos a los roles del navegador.
-
-REVOKE ALL ON TABLE
-    public.categorias,
-    public.unidades,
-    public.productos,
-    public.conversiones_unidades,
-    public.ventas,
-    public.venta_items,
-    public.ajustes_entradas,
-    public.ajuste_entrada_items,
-    public.movimientos_inventario
-FROM PUBLIC, anon, authenticated;
-
-REVOKE ALL ON TABLE
-    public.v_stock_actual,
-    public.v_ventas_diarias,
-    public.v_productos_mas_vendidos
-FROM PUBLIC, anon, authenticated;
-
--- Permisos para el backend.
--- IMPORTANTE: service_role debe mantenerse exclusivamente en Render.
-
-GRANT USAGE ON SCHEMA public TO service_role;
-
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
-    public.categorias,
-    public.unidades,
-    public.productos,
-    public.conversiones_unidades,
-    public.ventas,
-    public.venta_items,
-    public.ajustes_entradas,
-    public.ajuste_entrada_items,
-    public.movimientos_inventario
-TO service_role;
-
-GRANT SELECT ON TABLE
-    public.v_stock_actual,
-    public.v_ventas_diarias,
-    public.v_productos_mas_vendidos
-TO service_role;
-
--- Las funciones de negocio no deben ejecutarse desde el navegador.
-
-REVOKE ALL ON FUNCTION public.actualizar_fecha_modificacion()
-    FROM PUBLIC, anon, authenticated;
-
-REVOKE ALL ON FUNCTION public.obtener_factor_base(UUID, UUID)
-    FROM PUBLIC, anon, authenticated;
-
-REVOKE ALL ON FUNCTION public.preparar_venta_item()
-    FROM PUBLIC, anon, authenticated;
-
-REVOKE ALL ON FUNCTION public.recalcular_total_venta()
-    FROM PUBLIC, anon, authenticated;
-
-REVOKE ALL ON FUNCTION public.generar_movimiento_venta()
-    FROM PUBLIC, anon, authenticated;
-
-REVOKE ALL ON FUNCTION public.preparar_ajuste_item()
-    FROM PUBLIC, anon, authenticated;
-
-REVOKE ALL ON FUNCTION public.generar_movimiento_ajuste()
-    FROM PUBLIC, anon, authenticated;
-
-REVOKE ALL ON FUNCTION public.impedir_modificacion_historica()
-    FROM PUBLIC, anon, authenticated;
-
-REVOKE ALL ON FUNCTION public.anular_venta(UUID, VARCHAR, VARCHAR)
-    FROM PUBLIC, anon, authenticated;
-
-GRANT EXECUTE ON FUNCTION
-    public.anular_venta(UUID, VARCHAR, VARCHAR)
-TO service_role;
-
-COMMIT;
-
--- ============================================================
--- FIN DEL SCRIPT
--- ============================================================
-
-Hay cuatro puntos que debes tener presentes:
-1. Las ventas y sus ítems deben crearse en una sola transacción. Así, si falla la creación de un movimiento, tampoco queda guardada una venta incompleta.
-2. La corrección completa de una venta aún debe coordinarse desde el backend. El script incluye la anulación con reversión de stock; para corregir una venta, el backend deberá anular la original, registrar una nueva con los datos correctos y vincular ambas mediante corregida_por_venta_id, todo dentro de una transacción.
-3. Los ajustes deben registrarse con cantidades firmadas. Una cantidad positiva aumenta el stock y una negativa lo disminuye. Las entradas normales solo admiten cantidades positivas.
-4. RLS no sustituye la validación de sesión en Render. El backend debe validar el token de sesión en cada operación protegida y nunca aceptar como confiable un usuario_actor enviado sin validación por el navegador.
+# Esquema de base de datos — Inventario Ferrehaymar
+
+Base de datos PostgreSQL administrada con Supabase. Este documento describe las tablas, vistas, funciones, reglas de negocio, seguridad y el procedimiento para aplicar migraciones.
+
+> Última actualización: 2026-10-16. Si el esquema cambia, actualizar este archivo en el mismo commit que la migración.
+
+---
+
+## 1. Acceso a los datos
+
+```
+Navegador (Vercel)  →  API (Render)  →  Supabase / PostgreSQL
+```
+
+- El navegador **nunca** accede a la base de datos. No recibe claves de Supabase.
+- La API usa la clave `SUPABASE_SERVICE_ROLE_KEY`, guardada solo en las variables de entorno de Render.
+- Todas las tablas tienen RLS activado y **sin políticas** para `anon` ni `authenticated`; además se les revocaron los privilegios. Solo `service_role` tiene acceso.
+- La lógica de negocio que requiere varias escrituras vive en funciones de Postgres (RPC), que la API llama con `supabase.rpc(...)`.
+
+---
+
+## 2. Migraciones
+
+| Archivo | Contenido |
+|---|---|
+| Esquema inicial (`INVENTARIO FERREHAYMAR`) | 9 tablas, vistas, triggers, `anular_venta`, RLS y permisos |
+| `supabase/migrations/20261016152500_funciones_negocio.sql` | Columnas de idempotencia, `hoy_negocio`, `validar_stock_items`, `registrar_entrada`, `registrar_ajuste`, `registrar_venta`, `corregir_venta` |
+
+### Procedimiento para aplicar una migración
+
+1. Confirmar a qué proyecto de Supabase se está conectado (desarrollo o producción).
+2. Leer la migración y revisar su efecto. Si existen datos que deban conservarse, comprobarlos antes.
+3. Aplicarla primero en **desarrollo**.
+4. Ejecutar las pruebas de humo (sección 9) y verificar que todo salga en OK.
+5. Solo entonces aplicarla en producción, con autorización explícita.
+6. Una migración ya aplicada **no se edita**: los cambios posteriores van en una migración nueva con marca de tiempo (`AAAAMMDDHHMMSS_descripcion.sql`).
+
+> Al ejecutar en el SQL Editor de Supabase, si pregunta por RLS: las migraciones que no crean tablas no lo necesitan. Si una migración crea una tabla en `public`, debe incluir su propio `ENABLE ROW LEVEL SECURITY`.
+
+---
+
+## 3. Modelo de datos
+
+### Diagrama de relaciones
+
+```
+categorias ──< productos >── unidades
+                 │  │
+                 │  └──< conversiones_unidades (producto + unidad origen → unidad base)
+                 │
+                 ├──< venta_items >── ventas
+                 ├──< ajuste_entrada_items >── ajustes_entradas
+                 └──< movimientos_inventario   (stock = suma de cantidad_base)
+```
+
+### 3.1 `categorias`
+Clasificación de productos.
+- `nombre` único sin distinguir mayúsculas ni espacios extremos; no puede estar vacío.
+- `activo`: se desactiva en vez de borrar.
+
+### 3.2 `unidades`
+Catálogo global de unidades (`u`, `m`, `cm`, `mm`, `kg`, `g`, `lb`, `l`, `ml`, `gal`, `caja`, `paquete`, `docena`, `par`).
+- `codigo` único (sin distinguir mayúsculas).
+- `fraccionable`: indica si la unidad admite fracciones. **Es informativo**; hoy la base de datos no lo valida (ver sección 10).
+
+### 3.3 `productos`
+- `codigo` (SKU interno) único; `codigo_barras` único cuando no está vacío.
+- `categoria_id`, `unidad_base_id`: obligatorios, `ON DELETE RESTRICT`.
+- `precio_compra`, `precio_venta`: `NUMERIC(12,2)`, no negativos. Los precios son **por unidad base**.
+- `stock_minimo`: `NUMERIC(12,3)`, no negativo.
+- **El stock no se guarda aquí.** Se calcula desde `movimientos_inventario`.
+- `activo`: un producto con movimientos no se borra, se desactiva. Un producto inactivo no se puede vender.
+- `actualizado_en` se actualiza automáticamente.
+
+### 3.4 `conversiones_unidades`
+Permite registrar ventas, entradas y ajustes en una unidad distinta de la base.
+- Sentido del factor: **cantidad en unidad origen × `factor_conversion` = cantidad en unidad base.**
+- `factor_conversion > 0`, `NUMERIC(14,6)`.
+- Una sola conversión por (producto, unidad origen, unidad destino).
+- La unidad destino debe ser la unidad base del producto (así la busca `obtener_factor_base`).
+- Si no hay conversión activa, la operación se rechaza.
+
+**Ejemplos**
+
+| Producto | Unidad base | Conversión | Operación | Cantidad en base |
+|---|---|---|---|---|
+| Tornillo | `u` | `caja` → `u`, factor 100 | vender 2 cajas | 200 u |
+| Cable | `m` | `cm` → `m`, factor 0.01 | vender 50 cm | 0.500 m |
+| Cuerda | `m` | `rollo` → `m`, factor 25 | entrada de 0.5 rollo | 12.500 m |
+
+### 3.5 `ventas`
+Cabecera de una venta.
+- `fecha_venta` (`DATE`): día en que ocurrió la venta. Puede elegirla el vendedor, pero no puede ser futura.
+- `fecha_registro` (`TIMESTAMPTZ`): momento real en que se registró.
+- `total`: calculado por trigger a partir de los ítems; la API no lo envía.
+- `estado`: `registrada`, `corregida` o `anulada`.
+- `corregida_por_venta_id`: en una venta `corregida`, apunta a la venta nueva que la reemplaza.
+- `motivo_correccion`: obligatorio si la venta está `corregida`; también se guarda al anular.
+- `clave_idempotencia`: única cuando no es nula (ver sección 6.4).
+- Las ventas **no se pueden borrar**.
+
+### 3.6 `venta_items`
+Productos de una venta. **Inmutables** (no se editan ni borran).
+- `cantidad` y `unidad_id`: lo vendido, en la unidad en que se vendió.
+- `factor_conversion` y `cantidad_base`: calculados por trigger.
+- `precio_unitario`: precio **por la unidad en que se vendió**. Si no se envía, se toma `precio_venta × factor_conversion` del catálogo.
+- `costo_unitario_base`: copia de `productos.precio_compra` al momento de la venta.
+- `subtotal` y `utilidad_estimada`: columnas generadas.
+  - `subtotal = cantidad × precio_unitario`
+  - `utilidad_estimada = subtotal − (cantidad × factor_conversion × costo_unitario_base)`
+- `nombre_producto_snapshot`, `codigo_producto_snapshot`: nombre y código del producto en ese momento.
+- Cambiar el precio o el nombre en el catálogo **no** altera ventas anteriores.
+
+### 3.7 `ajustes_entradas`
+Cabecera de entradas de mercancía y ajustes de inventario.
+- `tipo`: `entrada` o `ajuste`.
+- `motivo` y `usuario_actor`: obligatorios.
+- `fecha`: día de la operación (no futura al usar las funciones).
+- `clave_idempotencia`: única cuando no es nula.
+- No se pueden borrar.
+
+### 3.8 `ajuste_entrada_items`
+Detalle de entradas y ajustes. **Inmutables.**
+- En una `entrada`, `cantidad > 0`.
+- En un `ajuste`, `cantidad` puede ser positiva o negativa, pero no cero.
+- `factor_conversion` y `cantidad_base` se calculan por trigger.
+
+### 3.9 `movimientos_inventario`
+Libro de movimientos. **Inmutable**: no se actualiza ni se borra; los errores se corrigen con un movimiento compensatorio.
+- `cantidad_base`: positiva = entra al stock, negativa = sale.
+- `cantidad_original` y `unidad_id`: lo que se registró en la unidad original.
+- `tipo`: `entrada`, `ajuste`, `venta`, `correccion_venta` (también permitido: `salida`, sin uso actual).
+- `referencia_tipo` / `referencia_id`: origen del movimiento (polimórfico, sin clave foránea).
+
+| Origen | `tipo` | `referencia_tipo` | `referencia_id` |
+|---|---|---|---|
+| Entrada o ajuste | `entrada` / `ajuste` | `ajuste_entrada` | id de la cabecera |
+| Venta | `venta` | `venta` | id de la venta |
+| Anulación o corrección | `correccion_venta` | `correccion` | id de la venta **original** |
+
+- `motivo` es obligatorio salvo en `venta` y `correccion_venta` (que lo traen implícito o por la función).
+- `hash_trazabilidad` y `referencia_tipo = 'import'` están reservados para fases futuras (Fase 12, importación CSV); hoy no se usan.
+
+---
+
+## 4. Vistas
+
+Todas con `security_invoker = true`; solo `service_role` puede leerlas.
+
+| Vista | Qué devuelve |
+|---|---|
+| `v_stock_actual` | Una fila por producto con `stock_actual` (suma de `cantidad_base`), `agotado` (stock ≤ 0) y `stock_bajo` (0 < stock ≤ `stock_minimo`). Los productos sin movimientos aparecen con stock 0. |
+| `v_ventas_diarias` | Por `fecha_venta`: número de ventas y total vendido, **solo ventas `registrada`**. |
+| `v_productos_mas_vendidos` | Por producto: cantidad vendida (en base), total vendido y utilidad estimada, **solo ventas `registrada`**. |
+
+### Cómo se contabilizan las ventas corregidas y anuladas
+
+- La venta **original corregida** y la **anulada** no cuentan en los informes (su estado ya no es `registrada`).
+- La venta **nueva** creada por una corrección sí cuenta (nace `registrada`).
+- El historial completo se conserva y se puede consultar por `estado`.
+
+---
+
+## 5. Funciones y triggers
+
+### 5.1 Funciones llamadas por la API (RPC)
+
+Solo `service_role` puede ejecutarlas.
+
+| Función | Parámetros principales | Devuelve |
+|---|---|---|
+| `registrar_entrada` | `p_motivo`, `p_usuario`, `p_items`, `p_fecha`, `p_observaciones`, `p_clave` | id de la entrada |
+| `registrar_ajuste` | `p_motivo`, `p_usuario`, `p_items`, `p_confirmar_stock_negativo`, `p_fecha`, `p_observaciones`, `p_clave` | id del ajuste |
+| `registrar_venta` | `p_usuario`, `p_items`, `p_fecha_venta`, `p_observaciones`, `p_confirmar_stock_negativo`, `p_clave` | id de la venta |
+| `corregir_venta` | `p_venta_id`, `p_motivo`, `p_usuario`, `p_items`, `p_fecha_venta`, `p_observaciones`, `p_confirmar_stock_negativo`, `p_clave` | id de la venta nueva |
+| `anular_venta` | `p_venta_id`, `p_motivo`, `p_usuario_actor` | nada |
+
+Formato de `p_items` (JSON):
+
+```json
+[
+  { "producto_id": "uuid", "cantidad": 2, "unidad_id": "uuid", "precio_unitario": 1000 }
+]
+```
+
+- `unidad_id` es opcional: si falta, se usa la unidad base del producto.
+- `precio_unitario` solo aplica a ventas y es opcional: si falta, se usa el precio de catálogo.
+- Cada función es **una sola transacción**: si algo falla, no queda nada a medias.
+- `anular_venta` es la única función `SECURITY DEFINER`.
+
+### 5.2 Funciones internas
+
+| Función | Uso |
+|---|---|
+| `hoy_negocio()` | Fecha de hoy en la zona horaria `America/Bogota`. |
+| `validar_stock_items(...)` | Valida los ítems y calcula si el stock quedaría negativo. Bloquea los productos involucrados en orden de id. |
+| `obtener_factor_base(producto, unidad)` | Devuelve el factor hacia la unidad base o falla si no hay conversión activa. |
+| `actualizar_fecha_modificacion()` | Mantiene `actualizado_en`. |
+| `impedir_modificacion_historica()` | Bloquea UPDATE/DELETE en registros históricos. |
+
+### 5.3 Triggers
+
+| Tabla | Trigger | Efecto |
+|---|---|---|
+| `venta_items` | antes de insertar | Valida venta activa y producto activo, calcula factor y `cantidad_base`, fija precio por defecto, costo y snapshots |
+| `venta_items` | después de insertar | Recalcula `ventas.total` y genera el movimiento `venta` (negativo) |
+| `ajuste_entrada_items` | antes de insertar | Valida signo según tipo, calcula factor y `cantidad_base` |
+| `ajuste_entrada_items` | después de insertar | Genera el movimiento `entrada` o `ajuste` |
+| `movimientos_inventario`, `venta_items`, `ajuste_entrada_items` | antes de UPDATE/DELETE | Rechaza la operación (inmutables) |
+| `ventas`, `ajustes_entradas` | antes de DELETE | Rechaza la operación |
+| `productos`, `ventas` | antes de UPDATE | Actualiza `actualizado_en` |
+
+---
+
+## 6. Reglas de negocio implementadas en la base de datos
+
+### 6.1 Stock
+El stock siempre es la suma de `movimientos_inventario.cantidad_base` por producto. No existe una columna editable de stock.
+
+### 6.2 Historial inmutable
+No se borran ni editan ventas, ítems, entradas, ajustes ni movimientos. Las correcciones se hacen con movimientos compensatorios.
+
+### 6.3 Stock insuficiente
+Al vender o hacer un ajuste negativo que dejaría el stock por debajo de cero, la función **no bloquea**: lanza el error `STOCK_INSUFICIENTE` con código SQLSTATE **`FH001`**.
+- `DETAIL`: JSON con, por producto, `producto_id`, `nombre`, `stock_actual`, `cambio` y `stock_resultante`.
+- La API debe mostrar la advertencia y, si el usuario confirma, repetir la llamada con `p_confirmar_stock_negativo = true`.
+- En supabase-js llega como `error.code === 'FH001'` y el detalle en `error.details`.
+
+### 6.4 Idempotencia
+`p_clave` evita duplicados cuando una petición se reintenta (doble clic, fallo de red).
+- Si ya existe una operación con esa clave, la función devuelve su id sin registrar nada nuevo.
+- La clave debe generarse en el frontend (UUID) al abrir el formulario y reutilizarse en los reintentos.
+- Cada operación distinta necesita su propia clave. En `corregir_venta`, la clave queda en la venta nueva.
+
+### 6.5 Fechas y zona horaria
+- La zona horaria del negocio es `America/Bogota`.
+- `fecha_venta` y `fecha` no pueden ser futuras (se comparan con `hoy_negocio()`).
+- `fecha_registro` y `creado_en` se guardan en UTC (`TIMESTAMPTZ`).
+
+### 6.6 Cantidades y redondeo
+- Cantidades con hasta 3 decimales; la conversión a base se redondea a 3 decimales una sola vez (`ROUND(cantidad × factor, 3)`).
+- Importes con 2 decimales.
+
+### 6.7 Corrección de ventas (`corregir_venta`)
+1. Exige motivo y usuario; solo corrige ventas `registrada`.
+2. Inserta movimientos `correccion_venta` positivos que revierten la venta original.
+3. Registra la venta nueva (validando el stock ya con lo restituido).
+4. Marca la original como `corregida` y la enlaza con `corregida_por_venta_id`.
+
+### 6.8 Anulación de ventas (`anular_venta`)
+1. Exige motivo y usuario; solo anula ventas `registrada`.
+2. Inserta movimientos `correccion_venta` positivos por cada ítem.
+3. Marca la venta como `anulada` y guarda el motivo.
+4. La venta y sus ítems siguen disponibles para consulta.
+
+---
+
+## 7. Seguridad
+
+- RLS activado en las 9 tablas, sin políticas para `anon`/`authenticated`.
+- `REVOKE ALL` sobre tablas, vistas y funciones para `PUBLIC`, `anon` y `authenticated`.
+- `GRANT` exclusivo a `service_role`.
+- **Toda función nueva** debe incluir `REVOKE ALL ... FROM PUBLIC, anon, authenticated` y `GRANT EXECUTE ... TO service_role`; Supabase expone como API las funciones del esquema `public`.
+- **Toda tabla nueva** en `public` debe incluir `ENABLE ROW LEVEL SECURITY` y los `REVOKE`/`GRANT` equivalentes.
+- La clave `service_role` solo vive en las variables de entorno de Render. Nunca en el frontend, el repositorio, los registros ni los mensajes de error.
+
+---
+
+## 8. Datos iniciales
+
+El esquema inserta las 14 unidades base del catálogo (sección 3.2). Categorías y productos se crean desde la aplicación o por importación CSV.
+
+---
+
+## 9. Pruebas
+
+| Script | Qué verifica |
+|---|---|
+| `prueba_inventario.sql` | Existencia de las 9 tablas, RLS activado, flujo entrada → venta → anulación, historial de movimientos, inmutabilidad y bloqueo de `anon`/`authenticated` |
+| `prueba_funciones.sql` | `registrar_entrada`, `registrar_venta`, `registrar_ajuste`, `corregir_venta`, idempotencia, conversión de unidades, precio por defecto, error `FH001`, validaciones y permisos de las funciones |
+
+Ambos corren en una transacción que termina en `ROLLBACK` (no dejan datos) y se ejecutan en **desarrollo**.
+
+---
+
+## 10. Limitaciones conocidas y pendientes
+
+- `ventas.fecha_venta` conserva `DEFAULT CURRENT_DATE` (UTC) del esquema inicial. No afecta si siempre se usa `registrar_venta`; corregir en una migración futura.
+- `unidades.fraccionable` no se valida: hoy se acepta una cantidad fraccionaria aunque la unidad no sea fraccionable. Decidir si se valida en la base de datos o en la API (Fase 6).
+- El costo histórico es el `precio_compra` vigente al vender, no un costo promedio. La utilidad es, por tanto, **estimada**.
+- No se valida que la unidad destino de una conversión sea la unidad base del producto al crearla (solo se usa si coincide). Validar en la API (Fase 6).
+- El stock puede quedar negativo si el usuario confirma la advertencia; la regla de quién puede confirmar está pendiente.
+- `hash_trazabilidad` y el tipo de movimiento `salida` están reservados y sin uso.
+- Falta documentar los respaldos y el procedimiento de restauración (Fase 14).
