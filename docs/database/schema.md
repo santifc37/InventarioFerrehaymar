@@ -23,7 +23,7 @@ Navegador (Vercel)  →  API (Render)  →  Supabase / PostgreSQL
 
 | Archivo | Contenido |
 |---|---|
-| Esquema inicial (`INVENTARIO FERREHAYMAR`) | 9 tablas, vistas, triggers, `anular_venta`, RLS y permisos |
+| `supabase/migrations/20261016120000_esquema_inicial.sql` | 9 tablas, vistas, triggers, `anular_venta`, RLS y permisos |
 | `supabase/migrations/20261016152500_funciones_negocio.sql` | Columnas de idempotencia, `hoy_negocio`, `validar_stock_items`, `registrar_entrada`, `registrar_ajuste`, `registrar_venta`, `corregir_venta` |
 
 ### Procedimiento para aplicar una migración
@@ -276,8 +276,8 @@ El esquema inserta las 14 unidades base del catálogo (sección 3.2). Categoría
 
 | Script | Qué verifica |
 |---|---|
-| `prueba_inventario.sql` | Existencia de las 9 tablas, RLS activado, flujo entrada → venta → anulación, historial de movimientos, inmutabilidad y bloqueo de `anon`/`authenticated` |
-| `prueba_funciones.sql` | `registrar_entrada`, `registrar_venta`, `registrar_ajuste`, `corregir_venta`, idempotencia, conversión de unidades, precio por defecto, error `FH001`, validaciones y permisos de las funciones |
+| `supabase/tests/prueba_inventario.sql` | Existencia de las 9 tablas, RLS activado, flujo entrada → venta → anulación, historial de movimientos, inmutabilidad y bloqueo de `anon`/`authenticated` |
+| `supabase/tests/prueba_funciones.sql` | `registrar_entrada`, `registrar_venta`, `registrar_ajuste`, `corregir_venta`, idempotencia, conversión de unidades, precio por defecto, error `FH001`, validaciones y permisos de las funciones |
 
 Ambos corren en una transacción que termina en `ROLLBACK` (no dejan datos) y se ejecutan en **desarrollo**.
 

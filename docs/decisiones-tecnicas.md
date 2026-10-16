@@ -26,7 +26,9 @@ Estados: **Decidida** (viene de la guía o del diseño ya construido) · **Propu
 | D-012 | **Entornos separados** de desarrollo y producción (proyectos distintos de Supabase, Render y Vercel). | Probar sin riesgo para los datos reales. | Decidida |
 | D-013 | Los cambios de esquema van en **migraciones versionadas** (`supabase/migrations/AAAAMMDDHHMMSS_descripcion.sql`). Una migración ya aplicada no se edita. | Historial claro y repetible. | Decidida |
 
-## Propuestas (confirmar antes de la Fase 2)
+## Propuestas aplicadas en la Fase 2 (confirmar)
+
+Estas propuestas de la Fase 0 ya se usaron para construir la estructura mínima. Si alguna se cambia, es más barato hacerlo ahora que más adelante.
 
 | ID | Propuesta | Motivo | Alternativa |
 |---|---|---|---|
@@ -34,6 +36,8 @@ Estados: **Decidida** (viene de la guía o del diseño ya construido) · **Propu
 | D-015 | **Node.js:** versión LTS vigente, fijada en un archivo `.nvmrc` y en el campo `engines` de `package.json`. | Mismas versiones en tu equipo, Render y Vercel. | — |
 | D-016 | **Pruebas:** Vitest para API y frontend; Supertest para los endpoints; Testing Library para componentes; las pruebas de base de datos son los scripts SQL de `supabase/tests/`. Pruebas de extremo a extremo (Playwright) se evalúan en la Fase 13. | Un solo ejecutor de pruebas en TypeScript, rápido y con poca configuración. | Jest. |
 | D-017 | **Migraciones en desarrollo:** aplicarlas por el SQL Editor de Supabase mientras el proyecto sea pequeño; evaluar la CLI de Supabase más adelante. | Menos configuración al inicio. | Supabase CLI desde el principio (más repetible). |
+| D-018 | **Versiones fijadas con `package-lock.json`** (se versiona). Versiones al 2026-10-16: Node 22, Express 5.3, Next.js 16.4, React 19.3, TypeScript 7.0, Vitest 5.0. | Todos instalan exactamente lo mismo; Render y Vercel usan el mismo lockfile. | — |
+| D-019 | **La API en desarrollo se ejecuta con `tsx watch`** y en producción compilada con `tsc` (`node dist/server.js`). **El frontend consulta la API desde el servidor de Next.js**, no desde el navegador, por ahora. | Reinicio automático al editar; la consulta desde el servidor evita configurar CORS antes de la Fase 4. | — |
 
 ## Pendientes por decidir
 
@@ -44,4 +48,5 @@ Estados: **Decidida** (viene de la guía o del diseño ya construido) · **Propu
 | P-003 | **Validación de `unidades.fraccionable`** (en la base de datos o en la API). | Fase 6 | Hoy es informativo. |
 | P-004 | **Costo para la ganancia estimada:** costo de compra vigente al vender (hoy) o costo promedio. | Fase 11 | Debe quedar documentada la metodología. |
 | P-005 | **Respaldos y recuperación** de Supabase y de la versión desplegada. | Fase 14 | Depende del plan de Supabase. |
+| P-007 | **Pruebas del frontend** (Testing Library). No se instalaron en la Fase 2 porque aún no hay componentes con lógica. | Fase 10 o 13 | Hoy `npm test` solo ejecuta las pruebas de la API. |
 | P-006 | **Plan de Render y arranque en frío.** En planes gratuitos el servicio se duerme y la primera petición tarda. | Fase 14 | Medir y decidir si es aceptable. |

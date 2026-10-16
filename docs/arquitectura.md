@@ -75,6 +75,10 @@ Estado al cierre de la Fase 0 (lo existente) y destino (se crea fase por fase):
 Ferreteria/
 ├── .gitignore                      ✔ Fase 0
 ├── .env.example                    ✔ Fase 0
+├── .nvmrc                          ✔ Fase 2
+├── package.json                    ✔ Fase 2   (npm workspaces)
+├── package-lock.json               ✔ Fase 2
+├── README.md                       ✔ Fase 2   (se completa en la Fase 14)
 ├── docs/
 │   ├── arquitectura.md             ✔ Fase 0
 │   ├── decisiones-tecnicas.md      ✔ Fase 0
@@ -84,16 +88,21 @@ Ferreteria/
 │   ├── migrations/                 ✔ esquema inicial + funciones de negocio
 │   └── tests/                      ✔ pruebas de humo SQL
 ├── apps/
-│   ├── api/                        · Fase 2   (Express + TypeScript)
-│   └── web/                        · Fase 2   (Next.js + TypeScript)
-├── scripts/                        · Fase 13  (check-env, verify-project)
-├── package.json                    · Fase 2   (npm workspaces)
-└── README.md                       · Fase 14
+│   ├── api/                        ✔ Fase 2   (Express + TypeScript; /health y su prueba)
+│   │   ├── src/{app.ts, server.ts, routes/health.ts}
+│   │   └── tests/health.test.ts
+│   └── web/                        ✔ Fase 2   (Next.js + TypeScript; página inicial)
+│       └── src/app/{layout.tsx, page.tsx, globals.css}
+└── scripts/                        · Fase 13  (check-env, verify-project)
 ```
+
+Carpetas como `middleware/`, `controllers/`, `services/`, `repositories/`, `validators/` (API) o `components/`, `features/` (web) se crean en la fase que las necesita.
+
+Puertos en desarrollo: API `4000`, frontend `3000`.
 
 La estructura interna de `apps/web` y `apps/api` está descrita en la guía de desarrollo por fases; cada carpeta se crea cuando su fase la necesita.
 
 ## 8. Estado actual
 
 - Base de datos: esquema y funciones de negocio escritos y con pruebas de humo (Fase 1). Falta confirmar en cada proyecto de Supabase qué migraciones están realmente aplicadas.
-- Aplicación (frontend y API): todavía no existe.
+- Aplicación (Fase 2): existe la estructura mínima. La API expone `GET /health` (sin base de datos ni sesión) y el frontend muestra si la API responde. Todavía **no** hay conexión con Supabase (Fase 3), autenticación (Fase 4) ni pantallas de negocio.
