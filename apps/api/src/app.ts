@@ -1,26 +1,24 @@
-import 'dotenv/config';
-import express from 'express';
-import { healthRouter } from './routes/health';
+import express, { Application } from 'express'
+import cookieParser from 'cookie-parser'
+import { healthRouter } from './routes/health'
+import { authRouter } from './routes/auth'
 
-// Configura Express (middleware y rutas). No inicia el puerto: eso lo hace server.ts.
-export function crearApp() {
-  const app = express();
+export function crearApp(): Application {
+  const app: Application = express()
 
-  app.disable('x-powered-by');
+  app.use(express.json())
+  app.use(cookieParser())
 
-  app.use(healthRouter);
+  app.use('/health', healthRouter)
+  app.use('/auth', authRouter)
 
-  const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  console.log(`Servidor corriendo en http://localhost:${PORT}`);
-});
+  app.get('/', (_req, res) => {
+    res.json({ ok: true, mensaje: 'API Ferretería funcionando correctamente' })
+  })
 
   app.use((_req, res) => {
-    res.status(404).json({ error: 'Ruta no encontrada' });
-  });
+    res.status(404).json({ error: 'Ruta no encontrada' })
+  })
 
-  return app;
+  return app
 }
-
-

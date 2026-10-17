@@ -1,42 +1,104 @@
-// La consulta a la API se hace en el servidor en cada visita (no en el navegador),
-// así no hace falta configurar CORS todavía.
-export const dynamic = 'force-dynamic';
+import Link from 'next/link'
+import { cookies } from 'next/headers'
+import { LogoutButton } from './logout-button'
 
-type EstadoApi = { conectada: boolean; detalle: string };
+export const dynamic = 'force-dynamic'
 
-async function consultarApi(): Promise<EstadoApi> {
-  const url = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+type EstadoSesion = {
+  autenticado: boolean
+}
+
+async function consultarSesion(): Promise<EstadoSesion> {
+  const cookieStore = await cookies()
+  const cookieSesion = cookieStore.get('sesion')?.value
+
+  if (!cookieSesion) {
+    return { autenticado: false }
+  }
 
   try {
+    const url = process.env.NEXT_PUBLIC_API_URL
+    if (!url) {
+      return { autenticado: false }
+    }
+
+    const res = await fetch(`${url}/auth/me`, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(3000),
+      headers: {
+        cookie: `sesion=${cookieSesion}`,
+      },
+    })
+
+    if (res.ok) {
+      return { autenticado: true }
+    }
+    return { autenticado: false }
+  } catch {
+    return { autenticado: false }
+  }
+}
+
+type EstadoApi = {
+  ok: boolean
+  mensaje?: string
+  error?: string
+}
+
+async function consultarApi(): Promise<EstadoApi> {
+  try {
+    const url = process.env.NEXT_PUBLIC_API_URL
+    if (!url) {
+      return { ok: false, error: 'NEXT_PUBLIC_API_URL no configurada' }
+    }
+
     const res = await fetch(`${url}/health`, {
       cache: 'no-store',
       signal: AbortSignal.timeout(3000),
-    });
+    })
 
     if (!res.ok) {
-      return { conectada: false, detalle: `La API respondió con el código ${res.status}.` };
+      return { ok: false, error: `Error ${res.status}` }
     }
-    return { conectada: true, detalle: 'La API respondió correctamente.' };
+
+    const data = (await res.json()) as { ok?: boolean; mensaje?: string }
+    return { ok: data.ok ?? true, mensaje: data.mensaje }
   } catch {
-    return { conectada: false, detalle: 'No se pudo conectar con la API. ¿Está en ejecución?' };
+    return { ok: false, error: 'No se pudo conectar con la API' }
   }
 }
 
 export default async function Inicio() {
-  const api = await consultarApi();
+  const [estadoApi, estadoSesion] = await Promise.all([
+    consultarApi(),
+    consultarSesion(),
+  ])
 
   return (
     <main className="contenedor">
-      <h1>Inventario Ferrehaymar</h1>
-      <p className="subtitulo">Inventario y ventas de la ferretería</p>
+      <h1 className="titulo">Sistema de Inventario — Ferretería Haymar</h1>
+      <p className="subtitulo">Estado de conexión</p>
+      <div className="estado">
+        <span className={estadoApi.ok ? 'punto-ok' : 'punto-error'}></span>
+        <span>
+          {estadoApi.ok
+            ? estadoApi.mensaje ?? 'API conectada correctamente'
+            : estadoApi.error ?? 'API no disponible'}
+        </span>
+      </div>
 
-      <section className="estado" aria-live="polite">
-        <span className={api.conectada ? 'punto punto-ok' : 'punto punto-error'} aria-hidden="true" />
-        <div>
-          <strong>{api.conectada ? 'API conectada' : 'API no disponible'}</strong>
-          <p>{api.detalle}</p>
-        </div>
-      </section>
+      <div style={{ marginTop: '1.5rem' }}>
+        {estadoSesion.autenticado ? (
+          <section className="sesion-activa">
+            <span>Sesión activa</span>
+            <LogoutButton />
+          </section>
+        ) : (
+          <Link className="boton-sesion" href="/login">
+            Ingresar
+          </Link>
+        )}
+      </div>
     </main>
-  );
+  )
 }
