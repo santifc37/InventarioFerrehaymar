@@ -1,12 +1,8 @@
 import { Router } from 'express';
+import { HealthController } from '../controllers/health.controller';
 
 export const healthRouter = Router();
+const healthController = new HealthController();
 
-// Comprobación de salud: no toca la base de datos ni requiere sesión.
-healthRouter.get('/health', (_req, res) => {
-  res.json({
-    estado: 'ok',
-    servicio: 'ferrehaymar-api',
-    fecha: new Date().toISOString(),
-  });
-});
+// Comprobación de salud: verifica conexión con base de datos
+healthRouter.get('/health', healthController.check.bind(healthController));

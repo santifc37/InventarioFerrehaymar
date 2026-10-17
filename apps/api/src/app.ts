@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import { healthRouter } from './routes/health';
 
@@ -9,9 +10,17 @@ export function crearApp() {
 
   app.use(healthRouter);
 
+  const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log(`Servidor corriendo en http://localhost:${PORT}`);
+});
+
   app.use((_req, res) => {
     res.status(404).json({ error: 'Ruta no encontrada' });
   });
 
   return app;
 }
+
+
