@@ -16,6 +16,7 @@ node_modules/
 dist/
 build/
 out/
+odd/
 .next/
 coverage/
 *.tsbuildinfo
@@ -38,3 +39,4 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
