@@ -5,6 +5,7 @@ import { authRouter } from './routes/auth'
 
 export function crearApp(): Application {
   const app: Application = express()
+  app.disable('x-powered-by')
 
   app.use(express.json())
   app.use(cookieParser())

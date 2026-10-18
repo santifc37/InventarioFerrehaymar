@@ -9,6 +9,8 @@ describe('GET /health', () => {
       ...originalEnv,
       SUPABASE_URL: 'https://test.supabase.co',
       SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+      SESSION_SECRET: 'test-session-secret-for-vitest-only',
+      AUTH_PASSWORD: 'test-password-for-vitest-only',
       NODE_ENV: 'test',
     };
     vi.resetModules();
