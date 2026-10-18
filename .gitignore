@@ -17,6 +17,7 @@ dist/
 build/
 out/
 odd/
+.atl/
 .next/
 coverage/
 *.tsbuildinfo
