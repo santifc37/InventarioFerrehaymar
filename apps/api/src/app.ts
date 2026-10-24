@@ -6,7 +6,7 @@ import { categoriasRouter } from './routes/categorias'
 import { productosRouter } from './routes/productos'
 import inventarioRouter from './routes/inventario'
 import { ventasRouter } from './routes/ventas'
-import unidadesRouter from "./routes/unidades";
+import unidadesRouter from './routes/unidades'
 
 export function crearApp(): Application {
   const app: Application = express()

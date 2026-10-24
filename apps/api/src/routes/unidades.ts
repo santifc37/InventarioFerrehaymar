@@ -1,24 +1,21 @@
 
-import { Router } from "express";
-import { supabase } from "../lib/supabase";
+import { Router, Request, Response, NextFunction } from 'express'
+import { requiereAuth } from '../middleware/requiereAuth'
+import { listarUnidades } from '../services/unidades.service'
 
-const router = Router();
+const router = Router()
 
-router.get("/", async (_req, res, next) => {
+router.get('/', requiereAuth, async (
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
   try {
-    const { data, error } = await supabase
-      .from("unidades")
-      .select("id, codigo, nombre")
-      .order("nombre", { ascending: true });
-
-    if (error) {
-      return next(error);
-    }
-
-    return res.json({ datos: data ?? [] });
+    const unidades = await listarUnidades()
+    res.json({ datos: unidades })
   } catch (error) {
-    return next(error);
+    next(error)
   }
-});
+})
 
-export default router;
+export default router
