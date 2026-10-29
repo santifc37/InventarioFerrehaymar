@@ -51,8 +51,6 @@ export async function listarProductos(activo?: boolean) {
   ]
 }
 
-
-
 export async function crearProducto(datos: {
   codigo: string
   codigo_barras?: string | null
