@@ -3,6 +3,10 @@
 
 import { useRef, useState } from "react";
 
+type EstadoProducto = "valido" | "error" | "duplicado";
+
+type ResultadoImportacion = "guardado" | "fallido";
+
 type ProductoCSV = {
   nombre: string;
   sku: string;
@@ -11,8 +15,29 @@ type ProductoCSV = {
   precioCompra: string;
   precioVenta: string;
   unidad: string;
-  estado: "valido" | "error" | "duplicado";
+  estado: EstadoProducto;
   errores: string[];
+  resultadoImportacion?: ResultadoImportacion;
+};
+
+type CategoriaAPI = {
+  id: string;
+  nombre: string;
+  activo: boolean;
+};
+
+type UnidadAPI = {
+  id: string;
+  codigo: string;
+  nombre: string;
+};
+
+type ProductoAPI = {
+  id: string;
+  codigo: string;
+  codigo_barras: string | null;
+  nombre: string;
+  activo: boolean;
 };
 
 const COLUMNAS = [
@@ -55,10 +80,82 @@ function separarCSV(linea: string, separador: string): string[] {
 function normalizar(texto: string): string {
   return texto
     .trim()
-    .toLowerCase()
+    .toLocaleLowerCase("es-CO")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[\s-]+/g, "_");
+}
+
+function normalizarCodigo(texto: string): string {
+  return texto.trim().toLocaleLowerCase("es-CO");
+}
+
+function normalizarUnidad(texto: string): string {
+  const unidad = normalizar(texto);
+
+  const equivalencias: Record<string, string> = {
+    u: "unidad",
+    und: "unidad",
+    un: "unidad",
+    unidad: "unidad",
+    unidades: "unidad",
+
+    m: "metro",
+    mt: "metro",
+    metro: "metro",
+    metros: "metro",
+
+    cm: "centimetro",
+    centimetro: "centimetro",
+    centimetros: "centimetro",
+
+    mm: "milimetro",
+    milimetro: "milimetro",
+    milimetros: "milimetro",
+
+    kg: "kilogramo",
+    kilo: "kilogramo",
+    kilos: "kilogramo",
+    kilogramo: "kilogramo",
+    kilogramos: "kilogramo",
+
+    g: "gramo",
+    gr: "gramo",
+    gramo: "gramo",
+    gramos: "gramo",
+
+    lb: "libra",
+    lbs: "libra",
+    libra: "libra",
+    libras: "libra",
+
+    l: "litro",
+    lt: "litro",
+    litro: "litro",
+    litros: "litro",
+
+    ml: "mililitro",
+    mililitro: "mililitro",
+    mililitros: "mililitro",
+
+    gal: "galon",
+    galon: "galon",
+    galones: "galon",
+
+    caja: "caja",
+    cajas: "caja",
+
+    paquete: "paquete",
+    paquetes: "paquete",
+
+    docena: "docena",
+    docenas: "docena",
+
+    par: "par",
+    pares: "par",
+  };
+
+  return equivalencias[unidad] ?? unidad;
 }
 
 function analizarCSV(contenido: string): {
@@ -73,19 +170,22 @@ function analizarCSV(contenido: string): {
   if (lineas.length < 2) {
     return {
       productos: [],
-      erroresColumnas: ["El archivo no contiene productos para revisar."],
+      erroresColumnas: [
+        "El archivo no contiene productos para revisar.",
+      ],
     };
   }
 
   const separador = [",", ";", "\t"].sort(
     (a, b) =>
       separarCSV(lineas[0], b).length -
-      separarCSV(lineas[0], a).length
+      separarCSV(lineas[0], a).length,
   )[0];
 
   const encabezados = separarCSV(lineas[0], separador).map(normalizar);
+
   const faltantes = COLUMNAS.filter(
-    (columna) => !encabezados.includes(columna)
+    (columna) => !encabezados.includes(columna),
   );
 
   if (faltantes.length > 0) {
@@ -93,21 +193,22 @@ function analizarCSV(contenido: string): {
       productos: [],
       erroresColumnas: [
         `Faltan estas columnas: ${faltantes.join(", ")}.`,
-        "Columnas requeridas: nombre, sku, codigo_barras, categoria, precio_compra, precio_venta, unidad.",
+        `Columnas requeridas: ${COLUMNAS.join(", ")}.`,
       ],
     };
   }
 
   const indices = Object.fromEntries(
-    encabezados.map((encabezado, indice) => [encabezado, indice])
+    encabezados.map((encabezado, indice) => [encabezado, indice]),
   );
 
   const productos = lineas.slice(1).map((linea): ProductoCSV => {
     const valores = separarCSV(linea, separador);
+
     const obtener = (columna: string) =>
       valores[indices[columna]]?.trim() ?? "";
 
-    const producto = {
+    const producto: ProductoCSV = {
       nombre: obtener("nombre"),
       sku: obtener("sku"),
       codigoBarras: obtener("codigo_barras"),
@@ -115,20 +216,31 @@ function analizarCSV(contenido: string): {
       precioCompra: obtener("precio_compra"),
       precioVenta: obtener("precio_venta"),
       unidad: obtener("unidad"),
-      estado: "valido" as ProductoCSV["estado"],
-      errores: [] as string[],
+      estado: "valido",
+      errores: [],
     };
 
-    if (!producto.nombre) producto.errores.push("Falta el nombre.");
-    if (!producto.sku) producto.errores.push("Falta el SKU.");
-    if (!producto.categoria) producto.errores.push("Falta la categoría.");
-    if (!producto.unidad) producto.errores.push("Falta la unidad.");
+    if (!producto.nombre) {
+      producto.errores.push("Falta el nombre.");
+    }
+
+    if (!producto.sku) {
+      producto.errores.push("Falta el SKU.");
+    }
+
+    if (!producto.categoria) {
+      producto.errores.push("Falta la categoría.");
+    }
+
+    if (!producto.unidad) {
+      producto.errores.push("Falta la unidad.");
+    }
 
     const compra = Number(producto.precioCompra);
     const venta = Number(producto.precioVenta);
 
     if (
-      !producto.precioCompra ||
+      producto.precioCompra === "" ||
       !Number.isFinite(compra) ||
       compra < 0
     ) {
@@ -136,14 +248,16 @@ function analizarCSV(contenido: string): {
     }
 
     if (
-      !producto.precioVenta ||
+      producto.precioVenta === "" ||
       !Number.isFinite(venta) ||
       venta < 0
     ) {
       producto.errores.push("Precio de venta inválido.");
     }
 
-    if (producto.errores.length > 0) producto.estado = "error";
+    if (producto.errores.length > 0) {
+      producto.estado = "error";
+    }
 
     return producto;
   });
@@ -152,8 +266,8 @@ function analizarCSV(contenido: string): {
   const codigosBarras = new Set<string>();
 
   productos.forEach((producto) => {
-    const sku = producto.sku.toLowerCase();
-    const barras = producto.codigoBarras;
+    const sku = normalizarCodigo(producto.sku);
+    const barras = normalizarCodigo(producto.codigoBarras);
 
     const skuRepetido = sku !== "" && skus.has(sku);
     const barrasRepetidas =
@@ -168,31 +282,55 @@ function analizarCSV(contenido: string): {
     ) {
       producto.estado = "duplicado";
       producto.errores.push(
-        "SKU o código de barras repetido dentro del archivo."
+        "SKU o código de barras repetido dentro del archivo.",
       );
     }
   });
 
-  return { productos, erroresColumnas: [] };
+  return {
+    productos,
+    erroresColumnas: [],
+  };
+}
+
+async function leerRespuesta(respuesta: Response) {
+  const datos = await respuesta.json().catch(() => null);
+
+  if (!respuesta.ok) {
+    throw new Error(
+      datos?.error ||
+        (respuesta.status === 401
+          ? "Tu sesión ha expirado. Inicia sesión nuevamente."
+          : `Error del servidor (${respuesta.status}).`),
+    );
+  }
+
+  return datos;
 }
 
 export default function ImportacionPage() {
   const inputRef = useRef<HTMLInputElement>(null);
+
   const [productos, setProductos] = useState<ProductoCSV[]>([]);
   const [nombreArchivo, setNombreArchivo] = useState("");
   const [erroresColumnas, setErroresColumnas] = useState<string[]>([]);
   const [errorArchivo, setErrorArchivo] = useState("");
+  const [errorImportacion, setErrorImportacion] = useState("");
   const [arrastrando, setArrastrando] = useState(false);
   const [filtro, setFiltro] = useState("todos");
+  const [importando, setImportando] = useState(false);
   const [revisado, setRevisado] = useState(false);
 
   async function cargarArchivo(archivo?: File) {
     if (!archivo) return;
 
     setErrorArchivo("");
+    setErrorImportacion("");
     setErroresColumnas([]);
     setProductos([]);
+    setNombreArchivo("");
     setRevisado(false);
+    setFiltro("todos");
 
     if (!archivo.name.toLowerCase().endsWith(".csv")) {
       setErrorArchivo("Selecciona un archivo con formato .csv.");
@@ -207,13 +345,31 @@ export default function ImportacionPage() {
       setProductos(resultado.productos);
       setErroresColumnas(resultado.erroresColumnas);
     } catch {
-      setErrorArchivo("No fue posible leer el archivo seleccionado.");
+      setErrorArchivo(
+        "No fue posible leer el archivo seleccionado.",
+      );
     }
   }
 
-  const validos = productos.filter((p) => p.estado === "valido").length;
-  const conErrores = productos.filter((p) => p.estado === "error").length;
-  const duplicados = productos.filter((p) => p.estado === "duplicado").length;
+  const validos = productos.filter(
+    (p) => p.estado === "valido",
+  ).length;
+
+  const conErrores = productos.filter(
+    (p) => p.estado === "error",
+  ).length;
+
+  const duplicados = productos.filter(
+    (p) => p.estado === "duplicado",
+  ).length;
+
+  const guardados = productos.filter(
+    (p) => p.resultadoImportacion === "guardado",
+  ).length;
+
+  const fallidos = productos.filter(
+    (p) => p.resultadoImportacion === "fallido",
+  ).length;
 
   const productosFiltrados = productos.filter((producto) => {
     if (filtro === "todos") return true;
@@ -223,29 +379,230 @@ export default function ImportacionPage() {
   function descargarPlantilla() {
     const contenido =
       "nombre,sku,codigo_barras,categoria,precio_compra,precio_venta,unidad\n" +
-      'Tornillo 1/4,TOR-001,7700000000011,Fijaciones,100,180,unidad\n' +
-      'Cable eléctrico,CAB-001,7700000000012,Electricidad,2500,3500,metro\n';
+      "Tornillo 1/4,TOR-001,7700000000011,Fijaciones,100,180,unidad\n" +
+      "Cable eléctrico,CAB-001,7700000000012,Electricidad,2500,3500,metro\n";
 
     const archivo = new Blob(["\uFEFF" + contenido], {
       type: "text/csv;charset=utf-8;",
     });
+
     const url = URL.createObjectURL(archivo);
     const enlace = document.createElement("a");
+
     enlace.href = url;
     enlace.download = "plantilla_productos.csv";
     enlace.click();
+
     URL.revokeObjectURL(url);
   }
 
   function limpiar() {
+    if (importando) return;
+
     setProductos([]);
     setNombreArchivo("");
     setErroresColumnas([]);
     setErrorArchivo("");
+    setErrorImportacion("");
     setFiltro("todos");
     setRevisado(false);
 
-    if (inputRef.current) inputRef.current.value = "";
+    if (inputRef.current) {
+      inputRef.current.value = "";
+    }
+  }
+
+  async function confirmarImportacion() {
+    if (importando || revisado || validos === 0) return;
+
+    setImportando(true);
+    setErrorImportacion("");
+
+    try {
+      // Consultar los datos existentes en la API.
+      const [respuestaCategorias, respuestaUnidades, respuestaProductos] =
+        await Promise.all([
+          fetch("/api/categorias", {
+            method: "GET",
+            credentials: "include",
+            cache: "no-store",
+          }),
+          fetch("/api/unidades", {
+            method: "GET",
+            credentials: "include",
+            cache: "no-store",
+          }),
+          fetch("/api/productos", {
+            method: "GET",
+            credentials: "include",
+            cache: "no-store",
+          }),
+        ]);
+
+      const [datosCategorias, datosUnidades, datosProductos] =
+        await Promise.all([
+          leerRespuesta(respuestaCategorias),
+          leerRespuesta(respuestaUnidades),
+          leerRespuesta(respuestaProductos),
+        ]);
+
+      const categoriasAPI: CategoriaAPI[] = Array.isArray(datosCategorias)
+        ? datosCategorias
+        : datosCategorias?.categorias ?? [];
+
+      const unidadesAPI: UnidadAPI[] = Array.isArray(datosUnidades)
+        ? datosUnidades
+        : datosUnidades?.datos ?? [];
+
+      const productosAPI: ProductoAPI[] = Array.isArray(datosProductos)
+        ? datosProductos
+        : [];
+
+      // Solo permitir asociar categorías activas.
+      const mapaCategorias = new Map<string, CategoriaAPI>();
+
+      categoriasAPI
+        .filter((categoria) => categoria.activo)
+        .forEach((categoria) => {
+          mapaCategorias.set(normalizar(categoria.nombre), categoria);
+        });
+
+      // Buscar unidades tanto por código como por nombre.
+      const mapaUnidades = new Map<string, UnidadAPI>();
+
+      unidadesAPI.forEach((unidad) => {
+        mapaUnidades.set(normalizar(unidad.nombre), unidad);
+        mapaUnidades.set(normalizar(unidad.codigo), unidad);
+
+        mapaUnidades.set(normalizarUnidad(unidad.nombre), unidad);
+        mapaUnidades.set(normalizarUnidad(unidad.codigo), unidad);
+      });
+
+      // Registrar códigos que ya existen para evitar duplicados.
+      const codigosExistentes = new Set(
+        productosAPI.map((producto) =>
+          normalizarCodigo(producto.codigo),
+        ),
+      );
+
+      const barrasExistentes = new Set(
+        productosAPI
+          .map((producto) =>
+            normalizarCodigo(producto.codigo_barras ?? ""),
+          )
+          .filter(Boolean),
+      );
+
+      // Trabajar sobre una copia para mostrar los resultados al finalizar.
+      const actualizados = productos.map((producto) => ({
+        ...producto,
+        errores: [...producto.errores],
+      }));
+
+      for (let i = 0; i < actualizados.length; i++) {
+        const producto = actualizados[i];
+
+        // No intentar guardar filas inválidas ni duplicadas del CSV.
+        if (producto.estado !== "valido") continue;
+
+        const categoria = mapaCategorias.get(
+          normalizar(producto.categoria),
+        );
+
+        const unidad =
+          mapaUnidades.get(normalizar(producto.unidad)) ??
+          mapaUnidades.get(normalizarUnidad(producto.unidad));
+
+        if (!categoria) {
+          producto.estado = "error";
+          producto.resultadoImportacion = "fallido";
+          producto.errores.push(
+            `No existe una categoría activa llamada "${producto.categoria}".`,
+          );
+          continue;
+        }
+
+        if (!unidad) {
+          producto.estado = "error";
+          producto.resultadoImportacion = "fallido";
+          producto.errores.push(
+            `No se encontró la unidad "${producto.unidad}" en la base de datos.`,
+          );
+          continue;
+        }
+
+        const codigo = normalizarCodigo(producto.sku);
+        const barras = normalizarCodigo(producto.codigoBarras);
+
+        if (codigosExistentes.has(codigo)) {
+          producto.estado = "duplicado";
+          producto.resultadoImportacion = "fallido";
+          producto.errores.push(
+            "Este SKU ya existe en la base de datos.",
+          );
+          continue;
+        }
+
+        if (barras && barrasExistentes.has(barras)) {
+          producto.estado = "duplicado";
+          producto.resultadoImportacion = "fallido";
+          producto.errores.push(
+            "Este código de barras ya existe en la base de datos.",
+          );
+          continue;
+        }
+
+        try {
+          const respuesta = await fetch("/api/productos", {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              codigo: producto.sku.trim(),
+              codigo_barras: producto.codigoBarras.trim() || null,
+              nombre: producto.nombre.trim(),
+              categoria_id: categoria.id,
+              unidad_base_id: unidad.id,
+              precio_compra: Number(producto.precioCompra),
+              precio_venta: Number(producto.precioVenta),
+              stock_minimo: 0,
+            }),
+          });
+
+          await leerRespuesta(respuesta);
+
+          producto.resultadoImportacion = "guardado";
+
+          // Evitar duplicados entre filas de esta misma importación.
+          codigosExistentes.add(codigo);
+
+          if (barras) {
+            barrasExistentes.add(barras);
+          }
+        } catch (error) {
+          producto.estado = "error";
+          producto.resultadoImportacion = "fallido";
+          producto.errores.push(
+            error instanceof Error
+              ? error.message
+              : "No fue posible guardar el producto.",
+          );
+        }
+      }
+
+      setProductos(actualizados);
+      setRevisado(true);
+    } catch (error) {
+      setErrorImportacion(
+        error instanceof Error
+          ? error.message
+          : "No fue posible consultar la API para importar los productos.",
+      );
+    } finally {
+      setImportando(false);
+    }
   }
 
   return (
@@ -261,6 +618,7 @@ export default function ImportacionPage() {
         </div>
 
         <button
+          type="button"
           className="importacion-btn-secundario"
           onClick={descargarPlantilla}
         >
@@ -269,7 +627,9 @@ export default function ImportacionPage() {
       </div>
 
       <section
-        className={`importacion-dropzone ${arrastrando ? "is-dragging" : ""}`}
+        className={`importacion-dropzone ${
+          arrastrando ? "is-dragging" : ""
+        }`}
         onDragOver={(e) => {
           e.preventDefault();
           setArrastrando(true);
@@ -278,7 +638,7 @@ export default function ImportacionPage() {
         onDrop={(e) => {
           e.preventDefault();
           setArrastrando(false);
-          cargarArchivo(e.dataTransfer.files[0]);
+          void cargarArchivo(e.dataTransfer.files[0]);
         }}
       >
         <input
@@ -286,7 +646,8 @@ export default function ImportacionPage() {
           type="file"
           accept=".csv,text/csv"
           hidden
-          onChange={(e) => cargarArchivo(e.target.files?.[0])}
+          disabled={importando}
+          onChange={(e) => void cargarArchivo(e.target.files?.[0])}
         />
 
         <div className="importacion-upload-icon">↑</div>
@@ -299,7 +660,9 @@ export default function ImportacionPage() {
         </p>
 
         <button
+          type="button"
           className="importacion-btn-principal"
+          disabled={importando}
           onClick={() => inputRef.current?.click()}
         >
           Seleccionar archivo
@@ -309,14 +672,21 @@ export default function ImportacionPage() {
           <div className="importacion-archivo">
             <span>Archivo seleccionado</span>
             <strong>{nombreArchivo}</strong>
-            <button onClick={limpiar} aria-label="Quitar archivo">
+            <button
+              type="button"
+              onClick={limpiar}
+              disabled={importando}
+              aria-label="Quitar archivo"
+            >
               Quitar
             </button>
           </div>
         )}
 
         {errorArchivo && (
-          <p className="importacion-error-general">{errorArchivo}</p>
+          <p role="alert" className="importacion-error-general">
+            {errorArchivo}
+          </p>
         )}
       </section>
 
@@ -326,15 +696,18 @@ export default function ImportacionPage() {
           El CSV debe incluir estas columnas en la primera fila. Puedes
           descargarlas como plantilla para evitar errores.
         </p>
+
         <div className="importacion-columnas">
           {COLUMNAS.map((columna) => (
             <span key={columna}>{columna}</span>
           ))}
         </div>
+
         <p className="importacion-nota">
           El archivo puede usar coma, punto y coma o tabulaciones como
-          separador. El stock inicial se registrará después mediante un
-          movimiento de entrada; no se importa desde esta plantilla.
+          separador. Los nombres de categoría y unidad deben coincidir
+          con los existentes en la base de datos. El stock inicial se
+          registra después mediante un movimiento de entrada.
         </p>
       </section>
 
@@ -347,6 +720,18 @@ export default function ImportacionPage() {
         </section>
       )}
 
+      {errorImportacion && (
+        <section className="importacion-alerta" role="alert">
+          <strong>No se pudo completar la importación</strong>
+          <p>{errorImportacion}</p>
+          <p>
+            Los productos que ya se hayan guardado permanecen en la base
+            de datos. Puedes volver a intentar la importación; los SKU
+            existentes serán detectados como duplicados.
+          </p>
+        </section>
+      )}
+
       {productos.length > 0 && (
         <>
           <section className="importacion-resumen">
@@ -354,18 +739,35 @@ export default function ImportacionPage() {
               <span>Registros encontrados</span>
               <strong>{productos.length}</strong>
             </div>
+
             <div className="importacion-resumen-card">
               <span>Válidos</span>
               <strong className="texto-valido">{validos}</strong>
             </div>
+
             <div className="importacion-resumen-card">
               <span>Con errores</span>
               <strong className="texto-error">{conErrores}</strong>
             </div>
+
             <div className="importacion-resumen-card">
               <span>Posibles duplicados</span>
               <strong className="texto-duplicado">{duplicados}</strong>
             </div>
+
+            {revisado && (
+              <>
+                <div className="importacion-resumen-card">
+                  <span>Productos guardados</span>
+                  <strong className="texto-valido">{guardados}</strong>
+                </div>
+
+                <div className="importacion-resumen-card">
+                  <span>No guardados al importar</span>
+                  <strong className="texto-error">{fallidos}</strong>
+                </div>
+              </>
+            )}
           </section>
 
           <section className="importacion-preview">
@@ -401,30 +803,38 @@ export default function ImportacionPage() {
                     <th>Estado</th>
                   </tr>
                 </thead>
+
                 <tbody>
                   {productosFiltrados.map((producto, indice) => (
                     <tr key={`${producto.sku}-${indice}`}>
                       <td>
                         <strong>{producto.nombre || "Sin nombre"}</strong>
+
                         {producto.errores.length > 0 && (
                           <small className="importacion-detalle-error">
                             {producto.errores.join(" ")}
                           </small>
                         )}
                       </td>
+
                       <td>{producto.sku || "—"}</td>
                       <td>{producto.codigoBarras || "—"}</td>
                       <td>{producto.categoria || "—"}</td>
-                      <td>{producto.precioCompra || "—"}</td>
-                      <td>{producto.precioVenta || "—"}</td>
+                      <td>{producto.precioCompra || "0"}</td>
+                      <td>{producto.precioVenta || "0"}</td>
                       <td>{producto.unidad || "—"}</td>
+
                       <td>
-                        <span className={`importacion-estado estado-${producto.estado}`}>
-                          {producto.estado === "valido"
-                            ? "Válido"
-                            : producto.estado === "error"
-                              ? "Con errores"
-                              : "Duplicado"}
+                        <span
+                          className={`importacion-estado estado-${producto.estado}`}
+                        >
+                          {producto.resultadoImportacion === "guardado"
+                            ? "Guardado"
+                            : producto.estado === "valido"
+                              ? "Válido"
+                              : producto.estado === "error"
+                                ? "Con errores"
+                                : "Duplicado"}
                         </span>
                       </td>
                     </tr>
@@ -444,29 +854,41 @@ export default function ImportacionPage() {
                 {productosFiltrados.length} de {productos.length} registros
                 mostrados
               </span>
+
               <button
+                type="button"
                 className="importacion-btn-secundario"
                 onClick={limpiar}
+                disabled={importando}
               >
                 Descartar archivo
               </button>
+
               <button
+                type="button"
                 className="importacion-btn-principal"
-                disabled={validos === 0 || revisado}
-                onClick={() => setRevisado(true)}
+                disabled={validos === 0 || revisado || importando}
+                onClick={() => void confirmarImportacion()}
               >
-                {revisado ? "Revisión completada" : "Confirmar revisión"}
+                {importando
+                  ? "Importando productos..."
+                  : revisado
+                    ? "Importación completada"
+                    : "Confirmar e importar"}
               </button>
             </div>
 
             {revisado && (
-              <div className="importacion-alerta">
-                <strong>Revisión completada</strong>
+              <div className="importacion-alerta" role="status">
+                <strong>Proceso de importación finalizado</strong>
                 <p>
-                  Hay {validos} registros válidos, {conErrores} con errores
-                  y {duplicados} posibles duplicados. Esta pantalla es una
-                  demostración: todavía no se guardan productos en la base
-                  de datos.
+                  Se guardaron {guardados} productos. {fallidos} registros
+                  no se pudieron guardar durante el proceso.
+                </p>
+                <p>
+                  Los registros inválidos o duplicados del archivo no se
+                  enviaron a la API. Revisa los detalles que aparecen en
+                  cada fila.
                 </p>
               </div>
             )}

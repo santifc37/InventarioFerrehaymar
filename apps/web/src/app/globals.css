@@ -4380,3 +4380,730 @@ body {
     width: 100%;
   }
 }
+
+/* ========================================
+   HISTORIAL DE VENTAS
+======================================== */
+
+.historial-ventas {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 30px;
+  color: #172033;
+}
+
+.encabezado-historial-ventas {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.encabezado-historial-ventas h1 {
+  margin: 6px 0;
+  color: #0f172a;
+  font-size: 29px;
+  font-weight: 750;
+  letter-spacing: -0.7px;
+}
+
+.encabezado-historial-ventas p {
+  margin: 8px 0 0;
+  color: #64748b;
+  font-size: 14px;
+}
+
+.boton-recargar-ventas {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 10px 16px;
+  border: 1px solid #dbe2ea;
+  border-radius: 9px;
+  background: #fff;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.boton-recargar-ventas:hover:not(:disabled) {
+  border-color: #93b4ef;
+  background: #f8fbff;
+}
+
+.boton-recargar-ventas:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.boton-recargar-ventas span {
+  font-size: 20px;
+}
+
+.resumen-historial-ventas {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.tarjeta-historial-ventas {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 11px;
+  padding: 22px;
+  border: 1px solid #e5eaf2;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 3px 12px rgb(15 23 42 / 3%);
+}
+
+.tarjeta-historial-ventas > span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.tarjeta-historial-ventas > strong {
+  overflow-wrap: anywhere;
+  color: #0f172a;
+  font-size: clamp(21px, 2vw, 28px);
+  font-weight: 750;
+  letter-spacing: -0.6px;
+}
+
+.tarjeta-historial-ventas > small {
+  color: #94a3b8;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.panel-historial-ventas {
+  overflow: hidden;
+  border: 1px solid #e5eaf2;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 3px 12px rgb(15 23 42 / 3%);
+}
+
+.cabecera-historial-ventas {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 24px;
+  border-bottom: 1px solid #edf0f5;
+}
+
+.cabecera-historial-ventas h2 {
+  margin: 0 0 6px;
+  color: #0f172a;
+  font-size: 18px;
+}
+
+.cabecera-historial-ventas p {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.contador-historial-ventas {
+  flex-shrink: 0;
+  padding: 7px 11px;
+  border-radius: 20px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.filtros-historial-ventas {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 210px;
+  gap: 16px;
+  padding: 20px 24px;
+  border-bottom: 1px solid #edf0f5;
+}
+
+.campo-historial-ventas {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.campo-historial-ventas label {
+  color: #334155;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.campo-historial-ventas input,
+.campo-historial-ventas select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 43px;
+  padding: 10px 12px;
+  border: 1px solid #dbe2ea;
+  border-radius: 9px;
+  outline: none;
+  background: #fff;
+  color: #0f172a;
+  font: inherit;
+  font-size: 13px;
+}
+
+.campo-historial-ventas input:focus,
+.campo-historial-ventas select:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgb(59 130 246 / 12%);
+}
+
+.tabla-historial-contenedor {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.tabla-historial-ventas {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.tabla-historial-ventas th {
+  padding: 13px 15px;
+  border-bottom: 1px solid #edf0f5;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.tabla-historial-ventas td {
+  padding: 16px 15px;
+  border-bottom: 1px solid #edf0f5;
+  color: #334155;
+  font-size: 12px;
+  vertical-align: middle;
+}
+
+.tabla-historial-ventas tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.tabla-historial-ventas tbody tr:hover {
+  background: #fafcff;
+}
+
+.tabla-historial-ventas td strong {
+  color: #172033;
+  font-weight: 650;
+}
+
+.id-historial-venta {
+  display: block;
+  white-space: nowrap;
+}
+
+.subtexto-historial-venta {
+  display: block;
+  margin-top: 5px;
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.resumen-productos-venta {
+  display: flex;
+  max-width: 240px;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.resumen-productos-venta strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resumen-productos-venta small {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.total-historial-venta {
+  white-space: nowrap;
+}
+
+.texto-secundario-ventas {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.estado-historial-venta {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 9px;
+  border-radius: 20px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.estado-historial-venta.estado-registrada,
+.estado-historial-venta.estado-vigente {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.estado-historial-venta.estado-corregida {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.estado-historial-venta.estado-anulada {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.boton-ver-detalle-venta {
+  padding: 8px 11px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.boton-ver-detalle-venta:hover {
+  border-color: #93c5fd;
+  background: #dbeafe;
+}
+
+.vacio-historial-ventas {
+  padding: 48px 20px !important;
+  text-align: center;
+}
+
+.vacio-historial-ventas > span {
+  display: block;
+  margin-bottom: 12px;
+  color: #94a3b8;
+  font-size: 35px;
+}
+
+.vacio-historial-ventas > strong {
+  display: block;
+  color: #334155;
+  font-size: 14px;
+}
+
+.vacio-historial-ventas > p {
+  margin: 7px 0 0;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.estado-historial-ventas {
+  display: flex;
+  min-height: 190px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.estado-historial-ventas p {
+  margin: 0;
+}
+
+.spinner-historial-ventas {
+  width: 28px;
+  height: 28px;
+  border: 3px solid #dbeafe;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: girar-historial-ventas 0.8s linear infinite;
+}
+
+@keyframes girar-historial-ventas {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.error-historial-ventas {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 20px 24px;
+  padding: 16px;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.error-historial-ventas strong {
+  font-size: 13px;
+}
+
+.error-historial-ventas p {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.error-historial-ventas button {
+  flex-shrink: 0;
+  padding: 9px 12px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fff;
+  color: #991b1b;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.nota-historial-ventas {
+  margin: 0;
+  padding: 13px 24px;
+  border-top: 1px solid #edf0f5;
+  color: #92400e;
+  background: #fffbeb;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* Detalle de la venta */
+
+.fondo-modal-historial-ventas {
+  position: fixed;
+  z-index: 1100;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  padding: 24px;
+  background: rgb(15 23 42 / 55%);
+  backdrop-filter: blur(3px);
+}
+
+.modal-historial-ventas {
+  width: 100%;
+  max-width: 850px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  border: 1px solid #e5eaf2;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgb(15 23 42 / 22%);
+}
+
+.cabecera-modal-historial-ventas {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 24px;
+  border-bottom: 1px solid #edf0f5;
+}
+
+.cabecera-modal-historial-ventas h2 {
+  margin: 7px 0;
+  color: #0f172a;
+  font-size: 23px;
+}
+
+.cabecera-modal-historial-ventas p {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.cerrar-modal-historial-ventas {
+  display: grid;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  background: #fff;
+  color: #64748b;
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.cerrar-modal-historial-ventas:hover {
+  background: #f8fafc;
+}
+
+.contenido-modal-historial-ventas {
+  padding: 24px;
+}
+
+.datos-detalle-venta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 26px;
+}
+
+.datos-detalle-venta > div {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 14px;
+  border: 1px solid #e5eaf2;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.datos-detalle-venta span,
+.observaciones-detalle-venta > span {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.datos-detalle-venta strong {
+  color: #172033;
+  font-size: 13px;
+}
+
+.contenido-modal-historial-ventas h3 {
+  margin: 0 0 14px;
+  color: #0f172a;
+  font-size: 15px;
+}
+
+.tabla-detalle-venta-contenedor {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid #edf0f5;
+  border-radius: 10px;
+}
+
+.tabla-detalle-venta {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.tabla-detalle-venta th {
+  padding: 12px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 750;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.tabla-detalle-venta td {
+  padding: 13px 12px;
+  border-top: 1px solid #edf0f5;
+  color: #334155;
+  font-size: 12px;
+}
+
+.tabla-detalle-venta td strong {
+  color: #172033;
+}
+
+.tabla-detalle-venta td:first-child {
+  min-width: 180px;
+}
+
+.tabla-detalle-venta td:first-child strong,
+.tabla-detalle-venta td:first-child small {
+  display: block;
+}
+
+.tabla-detalle-venta td:first-child small {
+  margin-top: 5px;
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.observaciones-detalle-venta {
+  margin-top: 20px;
+  padding: 14px;
+  border: 1px solid #e5eaf2;
+  border-radius: 9px;
+  background: #f8fafc;
+}
+
+.observaciones-detalle-venta p {
+  margin: 7px 0 0;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.total-detalle-venta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid #e5eaf2;
+}
+
+.total-detalle-venta span {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.total-detalle-venta strong {
+  color: #0f172a;
+  font-size: 24px;
+  font-weight: 750;
+}
+
+.pie-modal-historial-ventas {
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px 24px;
+  border-top: 1px solid #edf0f5;
+  background: #fafcff;
+}
+
+.pie-modal-historial-ventas button {
+  min-height: 40px;
+  padding: 10px 17px;
+  border: 1px solid #dbe2ea;
+  border-radius: 9px;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.pie-modal-historial-ventas button:hover {
+  background: #f1f5f9;
+}
+
+@media (max-width: 900px) {
+  .historial-ventas {
+    padding: 22px;
+  }
+
+  .resumen-historial-ventas {
+    grid-template-columns: 1fr;
+  }
+
+  .filtros-historial-ventas {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .campo-busqueda-historial {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 600px) {
+  .historial-ventas {
+    gap: 16px;
+    padding: 14px;
+  }
+
+  .encabezado-historial-ventas {
+    flex-direction: column;
+  }
+
+  .encabezado-historial-ventas h1 {
+    font-size: 24px;
+  }
+
+  .boton-recargar-ventas {
+    width: 100%;
+  }
+
+  .tarjeta-historial-ventas {
+    padding: 17px;
+  }
+
+  .cabecera-historial-ventas {
+    align-items: flex-start;
+    padding: 17px;
+  }
+
+  .cabecera-historial-ventas h2 {
+    font-size: 16px;
+  }
+
+  .contador-historial-ventas {
+    font-size: 10px;
+  }
+
+  .filtros-historial-ventas {
+    grid-template-columns: 1fr;
+    padding: 17px;
+  }
+
+  .campo-busqueda-historial {
+    grid-column: auto;
+  }
+
+  .error-historial-ventas {
+    align-items: flex-start;
+    flex-direction: column;
+    margin: 14px;
+  }
+
+  .fondo-modal-historial-ventas {
+    align-items: flex-start;
+    padding: 10px;
+  }
+
+  .modal-historial-ventas {
+    max-height: calc(100vh - 20px);
+  }
+
+  .cabecera-modal-historial-ventas,
+  .contenido-modal-historial-ventas {
+    padding: 17px;
+  }
+
+  .cabecera-modal-historial-ventas h2 {
+    font-size: 19px;
+  }
+
+  .datos-detalle-venta {
+    grid-template-columns: 1fr;
+  }
+
+  .total-detalle-venta strong {
+    font-size: 20px;
+  }
+
+  .pie-modal-historial-ventas {
+    padding: 14px 17px;
+  }
+
+  .pie-modal-historial-ventas button {
+    width: 100%;
+  }
+}

@@ -4,27 +4,7 @@ import { redirect } from 'next/navigation'
 
 export const dynamic = 'force-dynamic'
 
-async function obtenerSesion() {
-  const cookieStore = await cookies()
-  const cookieSesion = cookieStore.get('sesion')?.value
-
-  if (!cookieSesion) return { autenticado: false }
-
-  try {
-    const url = process.env.NEXT_PUBLIC_API_URL
-    if (!url) return { autenticado: false }
-
-    const res = await fetch(`${url}/auth/me`, {
-      cache: 'no-store',
-      signal: AbortSignal.timeout(3000),
-      headers: { cookie: `sesion=${cookieSesion}` },
-    })
-
-    return { autenticado: res.ok }
-  } catch {
-    return { autenticado: false }
-  }
-}
+type Registro = Record<string, any>
 
 const secciones = [
   { nombre: 'Dashboard', ruta: '/dashboard', icono: '▦' },
@@ -35,92 +15,318 @@ const secciones = [
   { nombre: 'Importación', ruta: '/importacion', icono: '⇧' },
 ]
 
-const indicadores = [
-  {
-    titulo: 'Ventas de hoy',
-    valor: '$ 485.000',
-    descripcion: 'Valor total vendido',
-    icono: '$',
-    tipo: 'azul',
-  },
-  {
-    titulo: 'Ventas registradas',
-    valor: '12',
-    descripcion: 'Operaciones de hoy',
-    icono: '↗',
-    tipo: 'verde',
-  },
-  {
-    titulo: 'Productos activos',
-    valor: '248',
-    descripcion: 'Referencias en inventario',
-    icono: '□',
-    tipo: 'morado',
-  },
-  {
-    titulo: 'Stock bajo',
-    valor: '8',
-    descripcion: 'Necesitan reposición',
-    icono: '!',
-    tipo: 'naranja',
-  },
-  {
-    titulo: 'Agotados',
-    valor: '3',
-    descripcion: 'Sin existencias disponibles',
-    icono: '○',
-    tipo: 'rojo',
-  },
-  {
-    titulo: 'Ganancia estimada',
-    valor: '$ 126.000',
-    descripcion: 'Estimación de las ventas de hoy',
-    icono: '↗',
-    tipo: 'verde',
-  },
-]
+const API_URL = (
+  process.env.API_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  'http://localhost:4000'
+).replace(/\/+$/, '')
 
-const ventasGrafico = [
-  { dia: 'Lun', valor: 45 },
-  { dia: 'Mar', valor: 65 },
-  { dia: 'Mié', valor: 38 },
-  { dia: 'Jue', valor: 80 },
-  { dia: 'Vie', valor: 58 },
-  { dia: 'Sáb', valor: 100 },
-  { dia: 'Dom', valor: 70 },
-]
+const moneda = new Intl.NumberFormat('es-CO', {
+  style: 'currency',
+  currency: 'COP',
+  maximumFractionDigits: 0,
+})
 
-const productosMasVendidos = [
-  { nombre: 'Cemento gris 50 kg', sku: 'CEM-001', unidades: 42, total: '$ 1.680.000' },
-  { nombre: 'Tubo PVC 1/2 pulgada', sku: 'PVC-012', unidades: 35, total: '$ 525.000' },
-  { nombre: 'Pintura blanca 1 galón', sku: 'PIN-001', unidades: 28, total: '$ 1.120.000' },
-  { nombre: 'Tornillo para madera', sku: 'TOR-001', unidades: 25, total: '$ 75.000' },
-  { nombre: 'Cinta aislante negra', sku: 'CIN-001', unidades: 22, total: '$ 66.000' },
-  { nombre: 'Brocha de 3 pulgadas', sku: 'BRO-003', unidades: 19, total: '$ 190.000' },
-  { nombre: 'Pegante para PVC', sku: 'PEG-001', unidades: 17, total: '$ 255.000' },
-  { nombre: 'Llave de paso 1/2', sku: 'LLA-012', unidades: 14, total: '$ 210.000' },
-  { nombre: 'Disco de corte', sku: 'DIS-001', unidades: 12, total: '$ 96.000' },
-  { nombre: 'Guantes de protección', sku: 'GUA-001', unidades: 10, total: '$ 80.000' },
-]
+function dinero(valor: number) {
+  return moneda.format(Number.isFinite(valor) ? valor : 0)
+}
 
-const productosPorReponer = [
-  { nombre: 'Cinta aislante negra', sku: 'CIN-001', actual: '2 unidades', minimo: '10 unidades', estado: 'Stock bajo' },
-  { nombre: 'Tubo PVC 1/2 pulgada', sku: 'PVC-012', actual: '0 unidades', minimo: '8 unidades', estado: 'Agotado' },
-  { nombre: 'Brocha de 3 pulgadas', sku: 'BRO-003', actual: '3 unidades', minimo: '6 unidades', estado: 'Stock bajo' },
-  { nombre: 'Pegante para PVC', sku: 'PEG-001', actual: '0 unidades', minimo: '5 unidades', estado: 'Agotado' },
-]
+function numero(valor: unknown): number {
+  const resultado = Number(valor)
+  return Number.isFinite(resultado) ? resultado : 0
+}
 
-const actividadReciente = [
-  { tipo: 'Venta', detalle: 'Venta de productos', fecha: 'Hoy · 10:35 a. m.', referencia: 'VEN-0012' },
-  { tipo: 'Entrada', detalle: 'Entrada de mercancía', fecha: 'Hoy · 9:20 a. m.', referencia: 'ENT-0008' },
-  { tipo: 'Ajuste', detalle: 'Ajuste de inventario', fecha: 'Ayer · 4:15 p. m.', referencia: 'AJU-0003' },
-  { tipo: 'Venta', detalle: 'Venta de productos', fecha: 'Ayer · 11:40 a. m.', referencia: 'VEN-0011' },
-]
+function texto(valor: unknown, alternativa = '—'): string {
+  return typeof valor === 'string' && valor.trim()
+    ? valor
+    : alternativa
+}
+
+function fechaBogota(fecha = new Date()): string {
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(fecha)
+
+  const obtener = (tipo: string) =>
+    partes.find((parte) => parte.type === tipo)?.value ?? ''
+
+  return `${obtener('year')}-${obtener('month')}-${obtener('day')}`
+}
+
+function claveFecha(fecha: unknown): string {
+  if (typeof fecha !== 'string' || !fecha) return ''
+  return fecha.slice(0, 10)
+}
+
+function fechaLegible(fecha: unknown): string {
+  if (typeof fecha !== 'string' || !fecha) return 'Sin fecha'
+
+  const date = new Date(fecha)
+  if (Number.isNaN(date.getTime())) return fecha
+
+  return new Intl.DateTimeFormat('es-CO', {
+    timeZone: 'America/Bogota',
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date)
+}
+
+function cantidadStock(producto: Registro): number {
+  for (const campo of [
+    'stock_actual',
+    'cantidad_actual',
+    'existencia',
+    'stock',
+    'cantidad_disponible',
+    'cantidad',
+  ]) {
+    if (producto[campo] !== undefined && producto[campo] !== null) {
+      return numero(producto[campo])
+    }
+  }
+
+  return 0
+}
+
+function minimoStock(producto: Registro): number {
+  return numero(
+    producto.stock_minimo ??
+    producto.minimo_stock ??
+    producto.cantidad_minima ??
+    0,
+  )
+}
+
+function nombreProducto(item: Registro): string {
+  const producto = Array.isArray(item.producto)
+    ? item.producto[0]
+    : item.producto
+
+  return texto(
+    item.nombre_producto_snapshot ??
+    producto?.nombre ??
+    item.nombre,
+    'Producto sin nombre',
+  )
+}
+
+function codigoProducto(item: Registro): string {
+  const producto = Array.isArray(item.producto)
+    ? item.producto[0]
+    : item.producto
+
+  return texto(
+    item.codigo_producto_snapshot ??
+    producto?.codigo ??
+    item.codigo,
+    'Sin código',
+  )
+}
+
+async function consultarApi(
+  ruta: string,
+  cookieSesion: string,
+): Promise<any | null> {
+  try {
+    const respuesta = await fetch(`${API_URL}${ruta}`, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(7000),
+      headers: {
+        cookie: `sesion=${cookieSesion}`,
+      },
+    })
+
+    if (!respuesta.ok) return null
+
+    return await respuesta.json()
+  } catch (error) {
+    console.error(`Error consultando ${ruta}:`, error)
+    return null
+  }
+}
 
 export default async function DashboardPage() {
-  const sesion = await obtenerSesion()
+  const cookieStore = await cookies()
+  const cookieSesion = cookieStore.get('sesion')?.value
 
-  if (!sesion.autenticado) redirect('/login')
+  if (!cookieSesion) redirect('/login')
+
+  const sesion = await consultarApi('/auth/me', cookieSesion)
+
+  if (!sesion) redirect('/login')
+
+  const [respuestaProductos, respuestaStock, respuestaVentas, respuestaMovimientos] =
+    await Promise.all([
+      consultarApi('/productos?activo=true', cookieSesion),
+      consultarApi('/inventario/stock?activo=true', cookieSesion),
+      consultarApi('/ventas', cookieSesion),
+      consultarApi('/inventario/movimientos', cookieSesion),
+    ])
+
+  const productos: Registro[] = Array.isArray(respuestaProductos)
+    ? respuestaProductos
+    : []
+
+  const stock: Registro[] = Array.isArray(respuestaStock?.productos)
+    ? respuestaStock.productos
+    : []
+
+  const ventas: Registro[] = Array.isArray(respuestaVentas?.datos)
+    ? respuestaVentas.datos
+    : []
+
+  const movimientos: Registro[] = Array.isArray(
+    respuestaMovimientos?.movimientos,
+  )
+    ? respuestaMovimientos.movimientos
+    : []
+
+  const hoy = fechaBogota()
+  const ventasValidas = ventas.filter(
+    (venta) => String(venta.estado ?? '').toLowerCase() !== 'anulada',
+  )
+
+  const ventasHoy = ventasValidas.filter(
+    (venta) => claveFecha(venta.fecha_venta) === hoy,
+  )
+
+  const totalHoy = ventasHoy.reduce(
+    (total, venta) => total + numero(venta.total),
+    0,
+  )
+
+  const cantidadVentasHoy = ventasHoy.length
+
+  const stockBajo = stock.filter((producto) => {
+    const actual = cantidadStock(producto)
+    const minimo = minimoStock(producto)
+    return actual > 0 && minimo > 0 && actual <= minimo
+  })
+
+  const agotados = stock.filter(
+    (producto) => cantidadStock(producto) <= 0,
+  )
+
+  const gananciaHoy = ventasHoy.reduce((total, venta) => {
+    const items = Array.isArray(venta.venta_items)
+      ? venta.venta_items
+      : []
+
+    return total + items.reduce(
+      (suma: number, item: Registro) =>
+        suma + numero(item.utilidad_estimada),
+      0,
+    )
+  }, 0)
+
+  const dias = Array.from({ length: 7 }, (_, indice) => {
+    const fecha = new Date(`${hoy}T12:00:00-05:00`)
+    fecha.setUTCDate(fecha.getUTCDate() - (6 - indice))
+
+    const clave = [
+      fecha.getUTCFullYear(),
+      String(fecha.getUTCMonth() + 1).padStart(2, '0'),
+      String(fecha.getUTCDate()).padStart(2, '0'),
+    ].join('-')
+
+    const nombre = new Intl.DateTimeFormat('es-CO', {
+      timeZone: 'America/Bogota',
+      weekday: 'short',
+    }).format(fecha)
+
+    return { clave, nombre: nombre.replace('.', '') }
+  })
+
+  const ventasSemana = dias.map((dia) => ({
+    ...dia,
+    total: ventasValidas
+      .filter((venta) => claveFecha(venta.fecha_venta) === dia.clave)
+      .reduce((suma, venta) => suma + numero(venta.total), 0),
+  }))
+
+  const maxVentaSemana = Math.max(
+    ...ventasSemana.map((dia) => dia.total),
+    1,
+  )
+
+  const totalSemana = ventasSemana.reduce(
+    (suma, dia) => suma + dia.total,
+    0,
+  )
+
+  const ranking = new Map<
+    string,
+    { nombre: string; codigo: string; unidades: number; total: number }
+  >()
+
+  for (const venta of ventasValidas) {
+    const items = Array.isArray(venta.venta_items)
+      ? venta.venta_items
+      : []
+
+    for (const item of items) {
+      const id = texto(item.producto_id, nombreProducto(item))
+      const existente = ranking.get(id) ?? {
+        nombre: nombreProducto(item),
+        codigo: codigoProducto(item),
+        unidades: 0,
+        total: 0,
+      }
+
+      existente.unidades += numero(item.cantidad)
+      existente.total += numero(item.subtotal)
+      ranking.set(id, existente)
+    }
+  }
+
+  const productosMasVendidos = Array.from(ranking.values())
+    .sort((a, b) => b.unidades - a.unidades)
+    .slice(0, 5)
+
+  const alertas = stock
+    .filter((producto) => {
+      const actual = cantidadStock(producto)
+      const minimo = minimoStock(producto)
+      return actual <= 0 || (minimo > 0 && actual <= minimo)
+    })
+    .sort((a, b) => cantidadStock(a) - cantidadStock(b))
+    .slice(0, 5)
+
+  const actividad = [
+    ...ventas.map((venta) => ({
+      tipo: 'Venta',
+      detalle: `Venta ${texto(venta.estado, 'registrada').toLowerCase()}`,
+      fecha: texto(venta.fecha_venta ?? venta.fecha_registro),
+      referencia: texto(venta.id).slice(0, 8),
+    })),
+    ...movimientos.map((movimiento) => {
+      const producto = Array.isArray(movimiento.producto)
+        ? movimiento.producto[0]
+        : movimiento.producto
+
+      return {
+        tipo: texto(movimiento.tipo, 'Movimiento'),
+        detalle: texto(producto?.nombre, texto(movimiento.motivo, 'Movimiento de inventario')),
+        fecha: texto(movimiento.fecha),
+        referencia: texto(movimiento.id).slice(0, 8),
+      }
+    }),
+  ]
+    .sort((a, b) => {
+      const fechaA = new Date(a.fecha).getTime() || 0
+      const fechaB = new Date(b.fecha).getTime() || 0
+      return fechaB - fechaA
+    })
+    .slice(0, 6)
+
+  const hayErrorDatos =
+    !respuestaProductos ||
+    !respuestaStock ||
+    !respuestaVentas ||
+    !respuestaMovimientos
 
   return (
     <main className="panel-aplicacion">
@@ -169,7 +375,7 @@ export default async function DashboardPage() {
             <p className="migas-pan">Inicio / Dashboard</p>
             <h1>Dashboard</h1>
             <p className="texto-secundario">
-              Resumen general de tu ferretería.
+              Resumen de tu ferretería con información del inventario y las ventas.
             </p>
           </div>
 
@@ -183,39 +389,83 @@ export default async function DashboardPage() {
         </header>
 
         <div className="contenido-dashboard">
-          <div className="aviso-demostracion">
-            <span>i</span>
-            <p>
-              <strong>Vista de demostración.</strong> Las cifras, los gráficos
-              y los registros de esta pantalla son ejemplos, no datos reales.
-            </p>
-          </div>
+          {hayErrorDatos && (
+            <div className="aviso-demostracion">
+              <span>!</span>
+              <p>
+                <strong>Información incompleta.</strong> No fue posible consultar
+                uno o más servicios de la API. Los indicadores muestran únicamente
+                los datos que se pudieron obtener; revisa la conexión con Render.
+              </p>
+            </div>
+          )}
 
           <section className="bienvenida-panel">
             <div>
               <p className="bienvenida-etiqueta">PANEL DE CONTROL</p>
               <h2>¡Bienvenido a Ferrehaymar!</h2>
               <p>
-                Controla tus existencias, revisa las ventas y encuentra
-                rápidamente los productos que necesitan atención.
+                Consulta tus ventas, revisa las existencias y encuentra
+                rápidamente los productos que necesitan reposición.
               </p>
             </div>
-            <div className="bienvenida-icono" aria-hidden="true">
-              ▥
-            </div>
+            <div className="bienvenida-icono" aria-hidden="true">▥</div>
           </section>
 
           <section className="seccion-dashboard">
             <div className="encabezado-seccion">
               <div>
                 <h2>Resumen general</h2>
-                <p>Indicadores principales del negocio</p>
+                <p>Indicadores del día y del inventario actual</p>
               </div>
-              <span className="etiqueta-ejemplo">Datos de ejemplo</span>
+              <span className="etiqueta-ejemplo">Datos reales</span>
             </div>
 
             <div className="rejilla-indicadores">
-              {indicadores.map((indicador) => (
+              {[
+                {
+                  titulo: 'Ventas de hoy',
+                  valor: dinero(totalHoy),
+                  descripcion: 'Total de ventas no anuladas',
+                  icono: '$',
+                  tipo: 'azul',
+                },
+                {
+                  titulo: 'Ventas registradas',
+                  valor: String(cantidadVentasHoy),
+                  descripcion: 'Ventas válidas de hoy',
+                  icono: '↗',
+                  tipo: 'verde',
+                },
+                {
+                  titulo: 'Productos activos',
+                  valor: String(productos.length),
+                  descripcion: 'Referencias activas',
+                  icono: '□',
+                  tipo: 'morado',
+                },
+                {
+                  titulo: 'Stock bajo',
+                  valor: String(stockBajo.length),
+                  descripcion: 'Productos en su mínimo o por debajo',
+                  icono: '!',
+                  tipo: 'naranja',
+                },
+                {
+                  titulo: 'Agotados',
+                  valor: String(agotados.length),
+                  descripcion: 'Productos sin existencias',
+                  icono: '○',
+                  tipo: 'rojo',
+                },
+                {
+                  titulo: 'Ganancia estimada',
+                  valor: dinero(gananciaHoy),
+                  descripcion: 'Suma de utilidad estimada registrada en las ventas',
+                  icono: '↗',
+                  tipo: 'verde',
+                },
+              ].map((indicador) => (
                 <article className="tarjeta-indicador" key={indicador.titulo}>
                   <div className="indicador-superior">
                     <span className={`indicador-icono indicador-${indicador.tipo}`}>
@@ -224,9 +474,7 @@ export default async function DashboardPage() {
                   </div>
                   <h3>{indicador.titulo}</h3>
                   <p className="indicador-valor">{indicador.valor}</p>
-                  <p className="indicador-descripcion">
-                    {indicador.descripcion}
-                  </p>
+                  <p className="indicador-descripcion">{indicador.descripcion}</p>
                 </article>
               ))}
             </div>
@@ -236,38 +484,38 @@ export default async function DashboardPage() {
             <div className="encabezado-seccion">
               <div>
                 <h2>Evolución de las ventas</h2>
-                <p>Ejemplo de ventas durante los últimos siete días</p>
+                <p>Ventas de los últimos siete días, incluido hoy</p>
               </div>
-              <span className="etiqueta-ejemplo">Datos de ejemplo</span>
             </div>
 
             <div className="panel-grafico">
               <div className="grafico-resumen">
-                <span>Total de ejemplo de la semana</span>
-                <strong>$ 3.250.000</strong>
+                <span>Total vendido en el periodo</span>
+                <strong>{dinero(totalSemana)}</strong>
               </div>
 
               <div
                 className="grafico-barras"
                 role="img"
-                aria-label="Gráfico ilustrativo de ventas de lunes a domingo"
+                aria-label="Gráfico de ventas de los últimos siete días"
               >
-                {ventasGrafico.map((venta) => (
-                  <div className="columna-grafico" key={venta.dia}>
+                {ventasSemana.map((dia) => (
+                  <div className="columna-grafico" key={dia.clave}>
                     <div className="zona-barra">
                       <div
                         className="barra-venta"
-                        style={{ height: `${venta.valor}%` }}
-                        title={`${venta.dia}: valor ilustrativo ${venta.valor}`}
+                        style={{
+                          height: `${dia.total === 0 ? 0 : Math.max(5, (dia.total / maxVentaSemana) * 100)}%`,
+                        }}
+                        title={`${dia.clave}: ${dinero(dia.total)}`}
                       />
                     </div>
-                    <span>{venta.dia}</span>
+                    <span>{dia.nombre}</span>
                   </div>
                 ))}
               </div>
               <p className="nota-grafico">
-                Gráfico ilustrativo. Los valores reales se calcularán al
-                conectar el historial de ventas.
+                Se excluyen las ventas anuladas. Los días sin ventas aparecen sin barra.
               </p>
             </div>
           </section>
@@ -276,11 +524,9 @@ export default async function DashboardPage() {
             <div className="encabezado-seccion">
               <div>
                 <h2>Productos más vendidos</h2>
-                <p>Ranking ilustrativo por unidades vendidas</p>
+                <p>Ranking por unidades registradas en ventas válidas</p>
               </div>
-              <a className="enlace-seccion" href="/ventas">
-                Consultar ventas →
-              </a>
+              <a className="enlace-seccion" href="/ventas">Consultar ventas →</a>
             </div>
 
             <div className="tabla-contenedor">
@@ -295,15 +541,19 @@ export default async function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {productosMasVendidos.map((producto, indice) => (
-                    <tr key={producto.sku}>
+                  {productosMasVendidos.length ? productosMasVendidos.map((producto, indice) => (
+                    <tr key={`${producto.codigo}-${producto.nombre}`}>
                       <td className="puesto-ranking">{indice + 1}</td>
                       <td className="celda-producto">{producto.nombre}</td>
-                      <td>{producto.sku}</td>
-                      <td>{producto.unidades}</td>
-                      <td className="celda-dinero">{producto.total}</td>
+                      <td>{producto.codigo}</td>
+                      <td>{producto.unidades.toLocaleString('es-CO')}</td>
+                      <td className="celda-dinero">{dinero(producto.total)}</td>
                     </tr>
-                  ))}
+                  )) : (
+                    <tr><td colSpan={5} className="tabla-sin-datos">
+                      Aún no hay productos registrados en ventas válidas.
+                    </td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -313,11 +563,9 @@ export default async function DashboardPage() {
             <div className="encabezado-seccion">
               <div>
                 <h2>Alertas de inventario</h2>
-                <p>Ejemplo de productos que requieren reposición</p>
+                <p>Productos agotados o con existencias iguales o inferiores al mínimo</p>
               </div>
-              <a className="enlace-seccion" href="/productos">
-                Ver inventario →
-              </a>
+              <a className="enlace-seccion" href="/productos">Ver productos →</a>
             </div>
 
             <div className="tabla-contenedor">
@@ -325,33 +573,35 @@ export default async function DashboardPage() {
                 <thead>
                   <tr>
                     <th>Producto</th>
+                    <th>Código</th>
                     <th>Stock actual</th>
                     <th>Stock mínimo</th>
                     <th>Estado</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {productosPorReponer.map((producto) => (
-                    <tr key={producto.sku}>
-                      <td>
-                        <span className="celda-producto">{producto.nombre}</span>
-                        <small className="texto-codigo">{producto.sku}</small>
-                      </td>
-                      <td>{producto.actual}</td>
-                      <td>{producto.minimo}</td>
-                      <td>
-                        <span
-                          className={`etiqueta-estado ${
-                            producto.estado === 'Agotado'
-                              ? 'estado-agotado'
-                              : 'estado-bajo'
-                          }`}
-                        >
-                          {producto.estado}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {alertas.length ? alertas.map((producto) => {
+                    const actual = cantidadStock(producto)
+                    const agotado = actual <= 0
+
+                    return (
+                      <tr key={texto(producto.id, texto(producto.codigo))}>
+                        <td className="celda-producto">{texto(producto.nombre, 'Producto sin nombre')}</td>
+                        <td>{texto(producto.codigo)}</td>
+                        <td>{actual.toLocaleString('es-CO')}</td>
+                        <td>{minimoStock(producto).toLocaleString('es-CO')}</td>
+                        <td>
+                          <span className={`etiqueta-estado ${agotado ? 'estado-agotado' : 'estado-bajo'}`}>
+                            {agotado ? 'Agotado' : 'Stock bajo'}
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  }) : (
+                    <tr><td colSpan={5} className="tabla-sin-datos">
+                      No hay alertas de inventario con los datos disponibles.
+                    </td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -361,11 +611,9 @@ export default async function DashboardPage() {
             <div className="encabezado-seccion">
               <div>
                 <h2>Actividad reciente</h2>
-                <p>Ejemplo de operaciones del inventario</p>
+                <p>Últimas ventas y movimientos de inventario</p>
               </div>
-              <a className="enlace-seccion" href="/movimientos">
-                Ver movimientos →
-              </a>
+              <a className="enlace-seccion" href="/movimientos">Ver movimientos →</a>
             </div>
 
             <div className="tabla-contenedor">
@@ -379,20 +627,22 @@ export default async function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {actividadReciente.map((actividad) => (
-                    <tr key={actividad.referencia}>
+                  {actividad.length ? actividad.map((registro, indice) => (
+                    <tr key={`${registro.tipo}-${registro.referencia}-${indice}`}>
                       <td>
-                        <span
-                          className={`etiqueta-actividad actividad-${actividad.tipo.toLowerCase()}`}
-                        >
-                          {actividad.tipo}
+                        <span className={`etiqueta-actividad actividad-${registro.tipo.toLowerCase()}`}>
+                          {registro.tipo}
                         </span>
                       </td>
-                      <td className="celda-producto">{actividad.detalle}</td>
-                      <td>{actividad.fecha}</td>
-                      <td>{actividad.referencia}</td>
+                      <td className="celda-producto">{registro.detalle}</td>
+                      <td>{fechaLegible(registro.fecha)}</td>
+                      <td>{registro.referencia}</td>
                     </tr>
-                  ))}
+                  )) : (
+                    <tr><td colSpan={4} className="tabla-sin-datos">
+                      No hay actividad registrada para mostrar.
+                    </td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -402,16 +652,16 @@ export default async function DashboardPage() {
             <div className="encabezado-seccion">
               <div>
                 <h2>Accesos rápidos</h2>
-                <p>Atajos a las operaciones frecuentes</p>
+                <p>Atajos a las pantallas disponibles</p>
               </div>
             </div>
 
             <div className="rejilla-accesos">
               <a className="tarjeta-acceso" href="/productos">
-                <span className="acceso-icono">＋</span>
+                <span className="acceso-icono">□</span>
                 <span>
-                  <strong>Agregar producto</strong>
-                  <small>Registrar un artículo nuevo</small>
+                  <strong>Consultar productos</strong>
+                  <small>Ver el inventario y sus referencias</small>
                 </span>
                 <span className="acceso-flecha">→</span>
               </a>
@@ -419,17 +669,17 @@ export default async function DashboardPage() {
               <a className="tarjeta-acceso" href="/ventas">
                 <span className="acceso-icono acceso-verde">$</span>
                 <span>
-                  <strong>Registrar venta</strong>
-                  <small>Guardar una venta realizada</small>
+                  <strong>Historial de ventas</strong>
+                  <small>Consultar las ventas registradas</small>
                 </span>
                 <span className="acceso-flecha">→</span>
               </a>
 
               <a className="tarjeta-acceso" href="/movimientos">
-                <span className="acceso-icono acceso-naranja">↥</span>
+                <span className="acceso-icono acceso-naranja">↕</span>
                 <span>
-                  <strong>Registrar entrada</strong>
-                  <small>Ingresar mercancía al inventario</small>
+                  <strong>Movimientos</strong>
+                  <small>Consultar el historial de inventario</small>
                 </span>
                 <span className="acceso-flecha">→</span>
               </a>
