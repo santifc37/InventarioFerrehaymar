@@ -1,38 +1,56 @@
 
 import { getSupabaseClient } from '../config/supabase'
 
-export async function listarProductos(activo?: boolean) {
-    let query = getSupabaseClient()
-    .from('productos')
-    .select(`
-      id,
-      codigo,
-      codigo_barras,
-      nombre,
-      descripcion,
-      categoria_id,
-      unidad_base_id,
-      precio_compra,
-      precio_venta,
-      stock_minimo,
-      activo,
-      creado_en,
-      actualizado_en
-    `)
-    .order('nombre', { ascending: true })
 
-  if (activo !== undefined) {
-    query = query.eq('activo', activo)
+export async function listarProductos(activo?: boolean) {
+  const crearConsulta = () => {
+    let query = getSupabaseClient()
+      .from('productos')
+      .select(`
+        id,
+        codigo,
+        codigo_barras,
+        nombre,
+        descripcion,
+        categoria_id,
+        unidad_base_id,
+        precio_compra,
+        precio_venta,
+        stock_minimo,
+        activo,
+        creado_en,
+        actualizado_en
+      `)
+      .order('nombre', { ascending: true })
+      .order('id', { ascending: true })
+
+    if (activo !== undefined) {
+      query = query.eq('activo', activo)
+    }
+
+    return query
   }
 
-  const { data, error } = await query
-  if (error) {
-    console.error('Error de Supabase al consultar productos:', error)
+  const [primeraConsulta, segundaConsulta] = await Promise.all([
+    crearConsulta().range(0, 999),
+    crearConsulta().range(1000, 1999)
+  ])
+
+  if (primeraConsulta.error || segundaConsulta.error) {
+    console.error(
+      'Error de Supabase al consultar productos:',
+      primeraConsulta.error || segundaConsulta.error
+    )
+
     throw new Error('No fue posible consultar los productos')
   }
 
-  return data
+  return [
+    ...(primeraConsulta.data ?? []),
+    ...(segundaConsulta.data ?? [])
+  ]
 }
+
 
 
 export async function crearProducto(datos: {
