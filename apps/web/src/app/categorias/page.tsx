@@ -1,77 +1,17 @@
 
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 interface Categoria {
   id: string
   nombre: string
-  descripcion: string
-  color: string
-  activa: boolean
-  productos: number
+  descripcion: string | null
+  activo: boolean
+  creado_en: string
 }
 
-const categoriasIniciales: Categoria[] = [
-  {
-    id: '1',
-    nombre: 'Construcción',
-    descripcion: 'Cementos, ladrillos y materiales de obra.',
-    color: '#2563eb',
-    activa: true,
-    productos: 18,
-  },
-  {
-    id: '2',
-    nombre: 'Tornillería',
-    descripcion: 'Tornillos, tuercas, arandelas y fijaciones.',
-    color: '#7c3aed',
-    activa: true,
-    productos: 35,
-  },
-  {
-    id: '3',
-    nombre: 'Pinturas',
-    descripcion: 'Pinturas, brochas, rodillos y accesorios.',
-    color: '#db2777',
-    activa: true,
-    productos: 12,
-  },
-  {
-    id: '4',
-    nombre: 'Electricidad',
-    descripcion: 'Cables, interruptores, tomas y conexiones.',
-    color: '#d97706',
-    activa: true,
-    productos: 21,
-  },
-  {
-    id: '5',
-    nombre: 'Herramientas',
-    descripcion: 'Herramientas manuales y accesorios.',
-    color: '#0d9488',
-    activa: true,
-    productos: 16,
-  },
-  {
-    id: '6',
-    nombre: 'Plomería',
-    descripcion: 'Tuberías, conexiones, válvulas y grifería.',
-    color: '#0284c7',
-    activa: true,
-    productos: 14,
-  },
-  {
-    id: '7',
-    nombre: 'Jardinería',
-    descripcion: 'Artículos para mantenimiento de jardines.',
-    color: '#65a30d',
-    activa: false,
-    productos: 0,
-  },
-]
-
-const coloresDisponibles = [
+const COLORES = [
   '#2563eb',
   '#7c3aed',
   '#db2777',
@@ -82,63 +22,127 @@ const coloresDisponibles = [
   '#64748b',
 ]
 
+type FiltroEstado = 'Todas' | 'Activas' | 'Inactivas'
+
 export default function CategoriasPage() {
-  const [categorias, setCategorias] = useState(categoriasIniciales)
+  const [categorias, setCategorias] = useState<Categoria[]>([])
   const [busqueda, setBusqueda] = useState('')
-  const [filtroEstado, setFiltroEstado] = useState('Todas')
+  const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>('Todas')
+
+  const [cargando, setCargando] = useState(true)
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState('')
+  const [mensaje, setMensaje] = useState('')
+
   const [mostrarFormulario, setMostrarFormulario] = useState(false)
-  const [categoriaEditando, setCategoriaEditando] = useState<string | null>(null)
+  const [categoriaEditando, setCategoriaEditando] =
+    useState<Categoria | null>(null)
+
   const [nombre, setNombre] = useState('')
   const [descripcion, setDescripcion] = useState('')
-  const [color, setColor] = useState(coloresDisponibles[0])
-  const [error, setError] = useState('')
+
+  const cargarCategorias = useCallback(async () => {
+    setCargando(true)
+    setError('')
+
+    try {
+      const respuesta = await fetch('/api/categorias', {
+        method: 'GET',
+        credentials: 'include',
+        cache: 'no-store',
+      })
+
+      const datos = await respuesta.json().catch(() => null)
+
+      if (!respuesta.ok) {
+        throw new Error(
+          datos?.error ||
+            (respuesta.status === 401
+              ? 'Tu sesión ha expirado. Inicia sesión nuevamente.'
+              : 'No fue posible consultar las categorías.'),
+        )
+      }
+
+      if (!Array.isArray(datos)) {
+        throw new Error('La respuesta del servidor no tiene el formato esperado.')
+      }
+
+      setCategorias(datos)
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'No fue posible conectar con el servidor.',
+      )
+    } finally {
+      setCargando(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void cargarCategorias()
+  }, [cargarCategorias])
 
   const categoriasFiltradas = useMemo(() => {
-    const texto = busqueda.trim().toLowerCase()
+    const texto = busqueda.trim().toLocaleLowerCase('es-CO')
 
     return categorias.filter((categoria) => {
+      const nombreCategoria = categoria.nombre.toLocaleLowerCase('es-CO')
+      const descripcionCategoria = (
+        categoria.descripcion ?? ''
+      ).toLocaleLowerCase('es-CO')
+
       const coincideBusqueda =
-        categoria.nombre.toLowerCase().includes(texto) ||
-        categoria.descripcion.toLowerCase().includes(texto)
+        nombreCategoria.includes(texto) ||
+        descripcionCategoria.includes(texto)
 
       const coincideEstado =
         filtroEstado === 'Todas' ||
-        (filtroEstado === 'Activas' && categoria.activa) ||
-        (filtroEstado === 'Inactivas' && !categoria.activa)
+        (filtroEstado === 'Activas' && categoria.activo) ||
+        (filtroEstado === 'Inactivas' && !categoria.activo)
 
       return coincideBusqueda && coincideEstado
     })
   }, [categorias, busqueda, filtroEstado])
 
-  const activas = categorias.filter((categoria) => categoria.activa).length
-  const inactivas = categorias.filter((categoria) => !categoria.activa).length
-  const totalProductos = categorias.reduce(
-    (total, categoria) => total + categoria.productos,
-    0,
-  )
+  const activas = categorias.filter((categoria) => categoria.activo).length
+  const inactivas = categorias.length - activas
 
   function abrirNuevaCategoria() {
     setCategoriaEditando(null)
     setNombre('')
     setDescripcion('')
-    setColor(coloresDisponibles[0])
     setError('')
+    setMensaje('')
     setMostrarFormulario(true)
   }
 
   function abrirEdicion(categoria: Categoria) {
-    setCategoriaEditando(categoria.id)
+    setCategoriaEditando(categoria)
     setNombre(categoria.nombre)
-    setDescripcion(categoria.descripcion)
-    setColor(categoria.color)
+    setDescripcion(categoria.descripcion ?? '')
     setError('')
+    setMensaje('')
     setMostrarFormulario(true)
   }
 
-  function guardarCategoria(evento: React.FormEvent<HTMLFormElement>) {
+  function cerrarFormulario() {
+    if (guardando) return
+
+    setMostrarFormulario(false)
+    setCategoriaEditando(null)
+    setNombre('')
+    setDescripcion('')
+    setError('')
+  }
+
+  async function guardarCategoria(
+    evento: React.FormEvent<HTMLFormElement>,
+  ) {
     evento.preventDefault()
 
     const nombreLimpio = nombre.trim()
+    const descripcionLimpia = descripcion.trim()
 
     if (!nombreLimpio) {
       setError('Escribe el nombre de la categoría.')
@@ -147,8 +151,9 @@ export default function CategoriasPage() {
 
     const duplicada = categorias.some(
       (categoria) =>
-        categoria.nombre.toLowerCase() === nombreLimpio.toLowerCase() &&
-        categoria.id !== categoriaEditando,
+        categoria.nombre.trim().toLocaleLowerCase('es-CO') ===
+          nombreLimpio.toLocaleLowerCase('es-CO') &&
+        categoria.id !== categoriaEditando?.id,
     )
 
     if (duplicada) {
@@ -156,53 +161,105 @@ export default function CategoriasPage() {
       return
     }
 
-    if (categoriaEditando) {
-      setCategorias((actuales) =>
-        actuales.map((categoria) =>
-          categoria.id === categoriaEditando
-            ? { ...categoria, nombre: nombreLimpio, descripcion: descripcion.trim(), color }
-            : categoria,
-        ),
-      )
-    } else {
-      const nuevaCategoria: Categoria = {
-        id: `demo-${Date.now()}`,
-        nombre: nombreLimpio,
-        descripcion: descripcion.trim(),
-        color,
-        activa: true,
-        productos: 0,
+    setGuardando(true)
+    setError('')
+
+    try {
+      const editando = categoriaEditando !== null
+      const url = editando
+        ? `/api/categorias/${encodeURIComponent(categoriaEditando.id)}`
+        : '/api/categorias'
+
+      const respuesta = await fetch(url, {
+        method: editando ? 'PATCH' : 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          nombre: nombreLimpio,
+          descripcion: descripcionLimpia || null,
+        }),
+      })
+
+      const datos = await respuesta.json().catch(() => null)
+
+      if (!respuesta.ok) {
+        throw new Error(
+          datos?.error ||
+            (respuesta.status === 401
+              ? 'Tu sesión ha expirado. Inicia sesión nuevamente.'
+              : 'No fue posible guardar la categoría.'),
+        )
       }
 
-      setCategorias((actuales) => [...actuales, nuevaCategoria])
-    }
+      setMostrarFormulario(false)
+      setCategoriaEditando(null)
+      setNombre('')
+      setDescripcion('')
+      setMensaje(
+        editando
+          ? 'Categoría actualizada correctamente.'
+          : 'Categoría creada correctamente.',
+      )
 
-    setMostrarFormulario(false)
+      await cargarCategorias()
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'No fue posible conectar con el servidor.',
+      )
+    } finally {
+      setGuardando(false)
+    }
   }
 
-  function cambiarEstado(categoria: Categoria) {
-    const accion = categoria.activa ? 'desactivar' : 'activar'
-
-    if (
-      !window.confirm(
-        `¿Deseas ${accion} la categoría "${categoria.nombre}"? Los productos existentes no se eliminarán.`,
-      )
-    ) {
-      return
-    }
-
-    setCategorias((actuales) =>
-      actuales.map((item) =>
-        item.id === categoria.id ? { ...item, activa: !item.activa } : item,
-      ),
+  async function desactivarCategoria(categoria: Categoria) {
+    const confirmar = window.confirm(
+      `¿Deseas desactivar la categoría "${categoria.nombre}"? Los productos existentes no se eliminarán.`,
     )
+
+    if (!confirmar) return
+
+    setError('')
+    setMensaje('')
+
+    try {
+      const respuesta = await fetch(
+        `/api/categorias/${encodeURIComponent(categoria.id)}/desactivar`,
+        {
+          method: 'PATCH',
+          credentials: 'include',
+        },
+      )
+
+      const datos = await respuesta.json().catch(() => null)
+
+      if (!respuesta.ok) {
+        throw new Error(
+          datos?.error || 'No fue posible desactivar la categoría.',
+        )
+      }
+
+      setMensaje('Categoría desactivada correctamente.')
+      await cargarCategorias()
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'No fue posible conectar con el servidor.',
+      )
+    }
   }
 
   return (
     <main className="categorias-page">
       <header className="categorias-encabezado">
         <div>
-          <span className="productos-migaja">Inventario / Categorías</span>
+          <span className="productos-migaja">
+            Inventario / Categorías
+          </span>
           <h1>Categorías</h1>
           <p>Organiza los productos de tu ferretería por tipo.</p>
         </div>
@@ -216,16 +273,67 @@ export default function CategoriasPage() {
         </button>
       </header>
 
-      <div className="categorias-aviso-demo">
-        <span aria-hidden="true">ⓘ</span>
-        <div>
-          <strong>Vista de demostración</strong>
-          <p>
-            Puedes crear, editar y activar categorías durante esta sesión.
-            Los cambios son temporales y se perderán al recargar la página.
-          </p>
+      {mensaje && (
+        <div
+          role="status"
+          style={{
+            padding: '13px 16px',
+            marginBottom: 18,
+            border: '1px solid #bbf7d0',
+            borderRadius: 10,
+            background: '#f0fdf4',
+            color: '#166534',
+            fontSize: 13,
+          }}
+        >
+          {mensaje}
+          <button
+            type="button"
+            onClick={() => setMensaje('')}
+            aria-label="Cerrar mensaje"
+            style={{
+              float: 'right',
+              border: 0,
+              background: 'transparent',
+              color: 'inherit',
+              cursor: 'pointer',
+            }}
+          >
+            ×
+          </button>
         </div>
-      </div>
+      )}
+
+      {error && !mostrarFormulario && (
+        <div
+          role="alert"
+          style={{
+            padding: '13px 16px',
+            marginBottom: 18,
+            border: '1px solid #fecaca',
+            borderRadius: 10,
+            background: '#fef2f2',
+            color: '#b91c1c',
+            fontSize: 13,
+          }}
+        >
+          {error}
+          <button
+            type="button"
+            onClick={() => void cargarCategorias()}
+            style={{
+              marginLeft: 12,
+              border: 0,
+              background: 'transparent',
+              color: 'inherit',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            Reintentar
+          </button>
+        </div>
+      )}
 
       <section className="categorias-resumen">
         <article className="categorias-resumen-card">
@@ -237,7 +345,9 @@ export default function CategoriasPage() {
         </article>
 
         <article className="categorias-resumen-card">
-          <span className="categorias-resumen-icono categorias-verde">✓</span>
+          <span className="categorias-resumen-icono categorias-verde">
+            ✓
+          </span>
           <div>
             <span>Categorías activas</span>
             <strong>{activas}</strong>
@@ -245,18 +355,12 @@ export default function CategoriasPage() {
         </article>
 
         <article className="categorias-resumen-card">
-          <span className="categorias-resumen-icono categorias-gris">Ⅱ</span>
+          <span className="categorias-resumen-icono categorias-gris">
+            Ⅱ
+          </span>
           <div>
             <span>Categorías inactivas</span>
             <strong>{inactivas}</strong>
-          </div>
-        </article>
-
-        <article className="categorias-resumen-card">
-          <span className="categorias-resumen-icono categorias-azul">▤</span>
-          <div>
-            <span>Productos asociados</span>
-            <strong>{totalProductos}</strong>
           </div>
         </article>
       </section>
@@ -265,10 +369,15 @@ export default function CategoriasPage() {
         <div className="categorias-panel-cabecera">
           <div>
             <h2>Listado de categorías</h2>
-            <p>Administra las categorías utilizadas para clasificar productos.</p>
+            <p>
+              Administra las categorías utilizadas para clasificar
+              productos.
+            </p>
           </div>
+
           <span className="categorias-contador">
-            {categoriasFiltradas.length} resultado{categoriasFiltradas.length === 1 ? '' : 's'}
+            {categoriasFiltradas.length}{' '}
+            {categoriasFiltradas.length === 1 ? 'resultado' : 'resultados'}
           </span>
         </div>
 
@@ -287,7 +396,9 @@ export default function CategoriasPage() {
             <span>Estado</span>
             <select
               value={filtroEstado}
-              onChange={(evento) => setFiltroEstado(evento.target.value)}
+              onChange={(evento) =>
+                setFiltroEstado(evento.target.value as FiltroEstado)
+              }
             >
               <option value="Todas">Todas las categorías</option>
               <option value="Activas">Activas</option>
@@ -302,79 +413,119 @@ export default function CategoriasPage() {
               <tr>
                 <th>Categoría</th>
                 <th>Descripción</th>
-                <th>Productos</th>
                 <th>Estado</th>
                 <th>Acciones</th>
               </tr>
             </thead>
-            <tbody>
-              {categoriasFiltradas.map((categoria) => (
-                <tr key={categoria.id}>
-                  <td>
-                    <div className="categorias-nombre">
-                      <span
-                        className="categorias-muestra-color"
-                        style={{ backgroundColor: categoria.color }}
-                      />
-                      <strong>{categoria.nombre}</strong>
-                    </div>
-                  </td>
-                  <td className="categorias-descripcion">
-                    {categoria.descripcion || 'Sin descripción'}
-                  </td>
-                  <td>
-                    <span className="categorias-productos-cantidad">
-                      {categoria.productos}
-                    </span>
-                  </td>
-                  <td>
-                    <span
-                      className={`categorias-estado ${
-                        categoria.activa ? 'categorias-estado-activa' : 'categorias-estado-inactiva'
-                      }`}
-                    >
-                      <span aria-hidden="true">●</span>
-                      {categoria.activa ? 'Activa' : 'Inactiva'}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="categorias-acciones">
-                      <button
-                        type="button"
-                        className="categorias-btn-editar"
-                        onClick={() => abrirEdicion(categoria)}
-                      >
-                        Editar
-                      </button>
-                      <button
-                        type="button"
-                        className="categorias-btn-estado"
-                        onClick={() => cambiarEstado(categoria)}
-                      >
-                        {categoria.activa ? 'Desactivar' : 'Activar'}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
 
-              {categoriasFiltradas.length === 0 && (
+            <tbody>
+              {cargando ? (
                 <tr>
-                  <td colSpan={5} className="categorias-vacio">
-                    <strong>No se encontraron categorías</strong>
-                    <p>Prueba con otra búsqueda o cambia el filtro.</p>
-                    <button
-                      type="button"
-                      className="productos-limpiar"
-                      onClick={() => {
-                        setBusqueda('')
-                        setFiltroEstado('Todas')
-                      }}
-                    >
-                      Limpiar filtros
-                    </button>
+                  <td colSpan={4} className="categorias-vacio">
+                    Cargando categorías...
                   </td>
                 </tr>
+              ) : categoriasFiltradas.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="categorias-vacio">
+                    <strong>
+                      {categorias.length === 0
+                        ? 'Todavía no hay categorías'
+                        : 'No se encontraron categorías'}
+                    </strong>
+                    <p>
+                      {categorias.length === 0
+                        ? 'Crea tu primera categoría para comenzar.'
+                        : 'Prueba con otra búsqueda o cambia el filtro.'}
+                    </p>
+
+                    {categorias.length === 0 ? (
+                      <button
+                        type="button"
+                        className="productos-btn productos-btn-primario"
+                        onClick={abrirNuevaCategoria}
+                      >
+                        Crear primera categoría
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="productos-limpiar"
+                        onClick={() => {
+                          setBusqueda('')
+                          setFiltroEstado('Todas')
+                        }}
+                      >
+                        Limpiar filtros
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ) : (
+                categoriasFiltradas.map((categoria) => {
+                  const indiceColor =
+                    Array.from(categoria.nombre).reduce(
+                      (total, caracter) => total + caracter.charCodeAt(0),
+                      0,
+                    ) % COLORES.length
+
+                  return (
+                    <tr key={categoria.id}>
+                      <td>
+                        <div className="categorias-nombre">
+                          <span
+                            className="categorias-muestra-color"
+                            style={{
+                              backgroundColor: COLORES[indiceColor],
+                            }}
+                          />
+                          <strong>{categoria.nombre}</strong>
+                        </div>
+                      </td>
+
+                      <td className="categorias-descripcion">
+                        {categoria.descripcion || 'Sin descripción'}
+                      </td>
+
+                      <td>
+                        <span
+                          className={`categorias-estado ${
+                            categoria.activo
+                              ? 'categorias-estado-activa'
+                              : 'categorias-estado-inactiva'
+                          }`}
+                        >
+                          <span aria-hidden="true">●</span>
+                          {categoria.activo ? 'Activa' : 'Inactiva'}
+                        </span>
+                      </td>
+
+                      <td>
+                        <div className="categorias-acciones">
+                          <button
+                            type="button"
+                            className="categorias-btn-editar"
+                            onClick={() => abrirEdicion(categoria)}
+                          >
+                            Editar
+                          </button>
+
+                          {categoria.activo && (
+                            <button
+                              type="button"
+                              className="categorias-btn-estado"
+                              onClick={() =>
+                                void desactivarCategoria(categoria)
+                              }
+                            >
+                              Desactivar
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })
               )}
             </tbody>
           </table>
@@ -385,7 +536,9 @@ export default function CategoriasPage() {
         <div
           className="producto-modal-fondo"
           onMouseDown={(evento) => {
-            if (evento.target === evento.currentTarget) setMostrarFormulario(false)
+            if (evento.target === evento.currentTarget) {
+              cerrarFormulario()
+            }
           }}
         >
           <section
@@ -396,17 +549,25 @@ export default function CategoriasPage() {
           >
             <header className="producto-formulario-cabecera">
               <div>
-                <span className="productos-migaja">Inventario / Categorías</span>
+                <span className="productos-migaja">
+                  Inventario / Categorías
+                </span>
                 <h2 id="categoria-formulario-titulo">
-                  {categoriaEditando ? 'Editar categoría' : 'Nueva categoría'}
+                  {categoriaEditando
+                    ? 'Editar categoría'
+                    : 'Nueva categoría'}
                 </h2>
-                <p>Define el nombre y la apariencia de la categoría.</p>
+                <p>
+                  Define el nombre y la descripción de la categoría.
+                </p>
               </div>
+
               <button
                 type="button"
                 className="producto-modal-cerrar"
-                onClick={() => setMostrarFormulario(false)}
+                onClick={cerrarFormulario}
                 aria-label="Cerrar formulario"
+                disabled={guardando}
               >
                 ×
               </button>
@@ -433,34 +594,20 @@ export default function CategoriasPage() {
                   Descripción
                   <textarea
                     value={descripcion}
-                    onChange={(evento) => setDescripcion(evento.target.value)}
+                    onChange={(evento) =>
+                      setDescripcion(evento.target.value)
+                    }
                     placeholder="¿Qué tipos de productos agrupa?"
                     rows={3}
                     maxLength={500}
                   />
                 </label>
 
-                <fieldset className="categorias-selector-colores">
-                  <legend>Color identificador</legend>
-                  <div>
-                    {coloresDisponibles.map((colorDisponible) => (
-                      <button
-                        key={colorDisponible}
-                        type="button"
-                        className={`categorias-color-opcion ${
-                          color === colorDisponible ? 'categorias-color-seleccionado' : ''
-                        }`}
-                        style={{ backgroundColor: colorDisponible }}
-                        onClick={() => setColor(colorDisponible)}
-                        aria-label={`Seleccionar color ${colorDisponible}`}
-                        aria-pressed={color === colorDisponible}
-                      />
-                    ))}
-                  </div>
-                </fieldset>
-
                 {error && (
-                  <div className="producto-formulario-error" role="alert">
+                  <div
+                    className="producto-formulario-error"
+                    role="alert"
+                  >
                     {error}
                   </div>
                 )}
@@ -472,15 +619,22 @@ export default function CategoriasPage() {
                   <button
                     type="button"
                     className="productos-btn productos-btn-secundario"
-                    onClick={() => setMostrarFormulario(false)}
+                    onClick={cerrarFormulario}
+                    disabled={guardando}
                   >
                     Cancelar
                   </button>
+
                   <button
                     type="submit"
                     className="productos-btn productos-btn-primario"
+                    disabled={guardando}
                   >
-                    {categoriaEditando ? 'Guardar cambios' : 'Crear categoría'}
+                    {guardando
+                      ? 'Guardando...'
+                      : categoriaEditando
+                        ? 'Guardar cambios'
+                        : 'Crear categoría'}
                   </button>
                 </div>
               </footer>

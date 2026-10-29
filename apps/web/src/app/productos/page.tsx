@@ -1,17 +1,47 @@
-
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import FormularioProducto from './FormularioProducto'
 
 type EstadoProducto = 'Disponible' | 'Stock bajo' | 'Agotado' | 'Inactivo'
+
+interface ProductoAPI {
+  producto_id: string
+  codigo: string
+  codigo_barras: string | null
+  nombre: string
+  descripcion: string | null
+  categoria_id: string
+  unidad_base_id: string
+  precio_compra: number
+  precio_venta: number
+  stock_minimo: number
+  activo: boolean
+  stock_actual: number
+  estado_stock: string
+}
+
+interface CategoriaAPI {
+  id: string
+  nombre: string
+  activo: boolean
+}
+
+interface UnidadAPI {
+  id: string
+  codigo: string
+  nombre: string
+}
 
 interface Producto {
   id: string
   nombre: string
   sku: string
   codigoBarras: string
+  descripcion: string
   categoria: string
+  categoriaId: string
+  unidadId: string
   precioCompra: number
   precioVenta: number
   stock: number
@@ -19,100 +49,6 @@ interface Producto {
   unidad: string
   activo: boolean
 }
-
-const productosDemo: Producto[] = [
-  {
-    id: '1',
-    nombre: 'Cemento gris 50 kg',
-    sku: 'CEM-001',
-    codigoBarras: '7701234500012',
-    categoria: 'Construcción',
-    precioCompra: 28000,
-    precioVenta: 35000,
-    stock: 45,
-    stockMinimo: 10,
-    unidad: 'bulto',
-    activo: true,
-  },
-  {
-    id: '2',
-    nombre: 'Tornillo autorroscante',
-    sku: 'TOR-001',
-    codigoBarras: '7701234500013',
-    categoria: 'Tornillería',
-    precioCompra: 150,
-    precioVenta: 300,
-    stock: 8,
-    stockMinimo: 20,
-    unidad: 'unidad',
-    activo: true,
-  },
-  {
-    id: '3',
-    nombre: 'Pintura blanca 1 galón',
-    sku: 'PIN-001',
-    codigoBarras: '7701234500014',
-    categoria: 'Pinturas',
-    precioCompra: 42000,
-    precioVenta: 55000,
-    stock: 12,
-    stockMinimo: 5,
-    unidad: 'galón',
-    activo: true,
-  },
-  {
-    id: '4',
-    nombre: 'Cable eléctrico calibre 12',
-    sku: 'CAB-012',
-    codigoBarras: '7701234500015',
-    categoria: 'Electricidad',
-    precioCompra: 1800,
-    precioVenta: 2500,
-    stock: 0,
-    stockMinimo: 15,
-    unidad: 'metro',
-    activo: true,
-  },
-  {
-    id: '5',
-    nombre: 'Martillo de carpintero',
-    sku: 'HER-001',
-    codigoBarras: '7701234500016',
-    categoria: 'Herramientas',
-    precioCompra: 18000,
-    precioVenta: 26000,
-    stock: 7,
-    stockMinimo: 3,
-    unidad: 'unidad',
-    activo: true,
-  },
-  {
-    id: '6',
-    nombre: 'Tubo PVC de 1/2 pulgada',
-    sku: 'PVC-012',
-    codigoBarras: '7701234500017',
-    categoria: 'Plomería',
-    precioCompra: 6500,
-    precioVenta: 9500,
-    stock: 30,
-    stockMinimo: 10,
-    unidad: 'unidad',
-    activo: true,
-  },
-  {
-    id: '7',
-    nombre: 'Brocha de 3 pulgadas',
-    sku: 'PIN-003',
-    codigoBarras: '7701234500018',
-    categoria: 'Pinturas',
-    precioCompra: 5000,
-    precioVenta: 8500,
-    stock: 0,
-    stockMinimo: 4,
-    unidad: 'unidad',
-    activo: false,
-  },
-]
 
 const formatoCOP = (valor: number) =>
   new Intl.NumberFormat('es-CO', {
@@ -129,29 +65,133 @@ function obtenerEstado(producto: Producto): EstadoProducto {
 }
 
 export default function ProductosPage() {
+  const [productos, setProductos] = useState<Producto[]>([])
+  const [cargando, setCargando] = useState(true)
+  const [error, setError] = useState('')
+
+  const [mostrarFormulario, setMostrarFormulario] = useState(false)
+  const [productoEnEdicion, setProductoEnEdicion] =
+    useState<Producto | null>(null)
+
   const [busqueda, setBusqueda] = useState('')
   const [categoria, setCategoria] = useState('Todas')
   const [estado, setEstado] = useState('Todos')
   const [orden, setOrden] = useState('nombre')
   const [pagina, setPagina] = useState(1)
   const [porPagina, setPorPagina] = useState(5)
-  const [mostrarFormulario, setMostrarFormulario] = useState(false)
+
+  const cargarProductos = useCallback(async () => {
+    setCargando(true)
+    setError('')
+
+    try {
+      const [respuestaStock, respuestaCategorias, respuestaUnidades] =
+        await Promise.all([
+          fetch('/api/inventario/stock', {
+            credentials: 'include',
+            cache: 'no-store',
+          }),
+          fetch('/api/categorias', {
+            credentials: 'include',
+            cache: 'no-store',
+          }),
+          fetch('/api/unidades', {
+            credentials: 'include',
+            cache: 'no-store',
+          }),
+        ])
+
+      if (!respuestaStock.ok) {
+        throw new Error('No fue posible consultar el inventario.')
+      }
+
+      if (!respuestaCategorias.ok) {
+        throw new Error('No fue posible consultar las categorías.')
+      }
+
+      if (!respuestaUnidades.ok) {
+        throw new Error('No fue posible consultar las unidades.')
+      }
+
+      const datosStock = await respuestaStock.json()
+
+      const datosCategorias: CategoriaAPI[] | {
+        categorias?: CategoriaAPI[]
+      } = await respuestaCategorias.json()
+
+      const datosUnidades = await respuestaUnidades.json()
+
+      const categoriasAPI: CategoriaAPI[] = Array.isArray(datosCategorias)
+        ? datosCategorias
+        : datosCategorias.categorias ?? []
+
+      const unidadesAPI: UnidadAPI[] = Array.isArray(datosUnidades)
+        ? datosUnidades
+        : datosUnidades.datos ?? []
+
+      const mapaCategorias = new Map(
+        categoriasAPI.map((item) => [item.id, item.nombre]),
+      )
+
+      const mapaUnidades = new Map(
+        unidadesAPI.map((item) => [item.id, item.nombre]),
+      )
+
+      const productosAPI: ProductoAPI[] = Array.isArray(datosStock.productos)
+        ? datosStock.productos
+        : []
+
+      const productosConvertidos: Producto[] = productosAPI.map((item) => ({
+        id: item.producto_id,
+        nombre: item.nombre,
+        sku: item.codigo,
+        codigoBarras: item.codigo_barras ?? '',
+        descripcion: item.descripcion ?? '',
+        categoria: mapaCategorias.get(item.categoria_id) ?? 'Sin categoría',
+        categoriaId: item.categoria_id,
+        unidadId: item.unidad_base_id,
+        precioCompra: Number(item.precio_compra),
+        precioVenta: Number(item.precio_venta),
+        stock: Number(item.stock_actual),
+        stockMinimo: Number(item.stock_minimo),
+        unidad: mapaUnidades.get(item.unidad_base_id) ?? 'Unidad',
+        activo: item.activo,
+      }))
+
+      setProductos(productosConvertidos)
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Ocurrió un error al cargar los productos.',
+      )
+    } finally {
+      setCargando(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void cargarProductos()
+  }, [cargarProductos])
 
   const categorias = useMemo(
-    () => [...new Set(productosDemo.map((producto) => producto.categoria))].sort(),
-    [],
+    () =>
+      [...new Set(productos.map((producto) => producto.categoria))].sort(
+        (a, b) => a.localeCompare(b, 'es'),
+      ),
+    [productos],
   )
 
   const productosFiltrados = useMemo(() => {
     const texto = busqueda.trim().toLowerCase()
 
-    return productosDemo
+    return productos
       .filter((producto) => {
         const coincideBusqueda =
           !texto ||
           producto.nombre.toLowerCase().includes(texto) ||
           producto.sku.toLowerCase().includes(texto) ||
-          producto.codigoBarras.includes(texto)
+          producto.codigoBarras.toLowerCase().includes(texto)
 
         const coincideCategoria =
           categoria === 'Todas' || producto.categoria === categoria
@@ -175,22 +215,30 @@ export default function ProductosPage() {
             return a.nombre.localeCompare(b.nombre, 'es')
         }
       })
-  }, [busqueda, categoria, estado, orden])
+  }, [productos, busqueda, categoria, estado, orden])
 
-  const totalPaginas = Math.max(1, Math.ceil(productosFiltrados.length / porPagina))
+  const totalPaginas = Math.max(
+    1,
+    Math.ceil(productosFiltrados.length / porPagina),
+  )
+
   const paginaActual = Math.min(pagina, totalPaginas)
   const inicio = (paginaActual - 1) * porPagina
-  const productosPagina = productosFiltrados.slice(inicio, inicio + porPagina)
 
-  const disponibles = productosDemo.filter(
+  const productosPagina = productosFiltrados.slice(
+    inicio,
+    inicio + porPagina,
+  )
+
+  const disponibles = productos.filter(
     (producto) => obtenerEstado(producto) === 'Disponible',
   ).length
 
-  const stockBajo = productosDemo.filter(
+  const stockBajo = productos.filter(
     (producto) => obtenerEstado(producto) === 'Stock bajo',
   ).length
 
-  const agotados = productosDemo.filter(
+  const agotados = productos.filter(
     (producto) => obtenerEstado(producto) === 'Agotado',
   ).length
 
@@ -200,6 +248,16 @@ export default function ProductosPage() {
     setEstado('Todos')
     setOrden('nombre')
     setPagina(1)
+  }
+
+  function abrirEdicion(producto: Producto) {
+    setMostrarFormulario(false)
+    setProductoEnEdicion(producto)
+  }
+
+  function cerrarFormulario() {
+    setMostrarFormulario(false)
+    setProductoEnEdicion(null)
   }
 
   return (
@@ -215,58 +273,79 @@ export default function ProductosPage() {
           <button
             type="button"
             className="productos-btn productos-btn-secundario"
-            onClick={() => window.alert('La importación CSV se implementará en su propia pantalla.')}
+            onClick={() =>
+              window.alert('La importación CSV se conectará en otro paso.')
+            }
           >
             Importar CSV
           </button>
+
           <button
             type="button"
             className="productos-btn productos-btn-primario"
-            onClick={() => setMostrarFormulario(true)}
-        >
+            onClick={() => {
+              setProductoEnEdicion(null)
+              setMostrarFormulario(true)
+            }}
+          >
             <span aria-hidden="true">＋</span> Nuevo producto
-        </button>
+          </button>
         </div>
       </header>
 
-      <div className="productos-aviso-demo">
-        <span aria-hidden="true">ⓘ</span>
-        <div>
-          <strong>Vista de demostración</strong>
-          <p>Los productos y existencias mostrados son datos de prueba. Los cambios no se guardan.</p>
+      {error && (
+        <div role="alert" className="productos-aviso-demo">
+          <div>
+            <strong>No se pudieron cargar los productos</strong>
+            <p>{error}</p>
+
+            <button
+              type="button"
+              className="productos-btn productos-btn-secundario"
+              onClick={() => void cargarProductos()}
+            >
+              Reintentar
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       <section className="productos-resumen" aria-label="Resumen de productos">
         <article className="productos-resumen-card">
           <span className="productos-resumen-icono">▦</span>
           <div>
             <span>Productos registrados</span>
-            <strong>{productosDemo.length}</strong>
+            <strong>{cargando ? '…' : productos.length}</strong>
           </div>
         </article>
 
         <article className="productos-resumen-card">
-          <span className="productos-resumen-icono productos-icono-verde">✓</span>
+          <span className="productos-resumen-icono productos-icono-verde">
+            ✓
+          </span>
           <div>
             <span>Disponibles</span>
-            <strong>{disponibles}</strong>
+            <strong>{cargando ? '…' : disponibles}</strong>
           </div>
         </article>
 
         <article className="productos-resumen-card">
-          <span className="productos-resumen-icono productos-icono-amarillo">!</span>
+          <span className="productos-resumen-icono productos-icono-amarillo">
+            !
+          </span>
           <div>
             <span>Stock bajo</span>
-            <strong>{stockBajo}</strong>
+            <strong>{cargando ? '…' : stockBajo}</strong>
           </div>
         </article>
 
         <article className="productos-resumen-card">
-          <span className="productos-resumen-icono productos-icono-rojo">×</span>
+          <span className="productos-resumen-icono productos-icono-rojo">
+            ×
+          </span>
           <div>
             <span>Agotados</span>
-            <strong>{agotados}</strong>
+            <strong>{cargando ? '…' : agotados}</strong>
           </div>
         </article>
       </section>
@@ -277,8 +356,10 @@ export default function ProductosPage() {
             <h2>Listado de productos</h2>
             <p>Busca, filtra y consulta la información del inventario.</p>
           </div>
+
           <span className="productos-total">
-            {productosFiltrados.length} resultado{productosFiltrados.length === 1 ? '' : 's'}
+            {productosFiltrados.length} resultado
+            {productosFiltrados.length === 1 ? '' : 's'}
           </span>
         </div>
 
@@ -307,7 +388,9 @@ export default function ProductosPage() {
             >
               <option value="Todas">Todas las categorías</option>
               {categorias.map((item) => (
-                <option key={item} value={item}>{item}</option>
+                <option key={item} value={item}>
+                  {item}
+                </option>
               ))}
             </select>
           </label>
@@ -331,7 +414,10 @@ export default function ProductosPage() {
 
           <label className="productos-filtro">
             <span>Ordenar por</span>
-            <select value={orden} onChange={(event) => setOrden(event.target.value)}>
+            <select
+              value={orden}
+              onChange={(event) => setOrden(event.target.value)}
+            >
               <option value="nombre">Nombre (A-Z)</option>
               <option value="precioAsc">Menor precio</option>
               <option value="precioDesc">Mayor precio</option>
@@ -363,60 +449,91 @@ export default function ProductosPage() {
                 <th>Acciones</th>
               </tr>
             </thead>
+
             <tbody>
-              {productosPagina.map((producto) => {
-                const estadoProducto = obtenerEstado(producto)
+              {cargando ? (
+                <tr>
+                  <td colSpan={8} className="productos-vacio">
+                    Cargando productos del inventario…
+                  </td>
+                </tr>
+              ) : (
+                productosPagina.map((producto) => {
+                  const estadoProducto = obtenerEstado(producto)
 
-                return (
-                  <tr key={producto.id}>
-                    <td>
-                      <div className="productos-nombre">
-                        <span className="productos-avatar" aria-hidden="true">
-                          {producto.nombre.charAt(0).toUpperCase()}
-                        </span>
-                        <div>
-                          <strong>{producto.nombre}</strong>
-                          <small>{producto.codigoBarras}</small>
+                  return (
+                    <tr key={producto.id}>
+                      <td>
+                        <div className="productos-nombre">
+                          <span
+                            className="productos-avatar"
+                            aria-hidden="true"
+                          >
+                            {producto.nombre.charAt(0).toUpperCase()}
+                          </span>
+                          <div>
+                            <strong>{producto.nombre}</strong>
+                            <small>
+                              {producto.codigoBarras || 'Sin código de barras'}
+                            </small>
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    <td><span className="productos-sku">{producto.sku}</span></td>
-                    <td>{producto.categoria}</td>
-                    <td>{formatoCOP(producto.precioCompra)}</td>
-                    <td><strong>{formatoCOP(producto.precioVenta)}</strong></td>
-                    <td>
-                      <div className="productos-stock">
-                        <strong>{producto.stock}</strong>
-                        <span>{producto.unidad}{producto.stock === 1 ? '' : 's'}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <span className={`productos-estado productos-estado-${estadoProducto.toLowerCase().replace(' ', '-')}`}>
-                        <span aria-hidden="true">●</span> {estadoProducto}
-                      </span>
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="productos-accion"
-                        aria-label={`Ver detalles de ${producto.nombre}`}
-                        title="Ver detalles"
-                        onClick={() => window.alert(`Detalles de demostración: ${producto.nombre}`)}
-                      >
-                        Ver
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
+                      </td>
 
-              {productosPagina.length === 0 && (
+                      <td>
+                        <span className="productos-sku">{producto.sku}</span>
+                      </td>
+
+                      <td>{producto.categoria}</td>
+                      <td>{formatoCOP(producto.precioCompra)}</td>
+
+                      <td>
+                        <strong>{formatoCOP(producto.precioVenta)}</strong>
+                      </td>
+
+                      <td>
+                        <div className="productos-stock">
+                          <strong>{producto.stock}</strong>
+                          <span>{producto.unidad}</span>
+                        </div>
+                      </td>
+
+                      <td>
+                        <span
+                          className={`productos-estado productos-estado-${estadoProducto
+                            .toLowerCase()
+                            .replace(' ', '-')}`}
+                        >
+                          <span aria-hidden="true">●</span> {estadoProducto}
+                        </span>
+                      </td>
+
+                      <td>
+                        <button
+                          type="button"
+                          className="productos-btn productos-btn-primario"
+                          onClick={() => abrirEdicion(producto)}
+                        >
+                          Editar producto
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
+
+              {!cargando && productosPagina.length === 0 && (
                 <tr>
                   <td colSpan={8} className="productos-vacio">
                     <span aria-hidden="true">⌕</span>
                     <strong>No se encontraron productos</strong>
                     <p>Prueba con otro término o cambia los filtros.</p>
-                    <button type="button" className="productos-limpiar" onClick={limpiarFiltros}>
+
+                    <button
+                      type="button"
+                      className="productos-limpiar"
+                      onClick={limpiarFiltros}
+                    >
                       Limpiar búsqueda
                     </button>
                   </td>
@@ -430,7 +547,10 @@ export default function ProductosPage() {
           <span>
             {productosFiltrados.length === 0
               ? 'Sin resultados'
-              : `Mostrando ${inicio + 1}–${Math.min(inicio + porPagina, productosFiltrados.length)} de ${productosFiltrados.length}`}
+              : `Mostrando ${inicio + 1}–${Math.min(
+                  inicio + porPagina,
+                  productosFiltrados.length,
+                )} de ${productosFiltrados.length}`}
           </span>
 
           <div className="productos-paginacion-controles">
@@ -457,7 +577,11 @@ export default function ProductosPage() {
             >
               ←
             </button>
-            <span className="productos-pagina-numero">{paginaActual} / {totalPaginas}</span>
+
+            <span className="productos-pagina-numero">
+              {paginaActual} / {totalPaginas}
+            </span>
+
             <button
               type="button"
               disabled={paginaActual >= totalPaginas}
@@ -469,11 +593,53 @@ export default function ProductosPage() {
           </div>
         </footer>
       </section>
-      {mostrarFormulario && (
-  <FormularioProducto
-    onCerrar={() => setMostrarFormulario(false)}
-  />
-)}
+
+      {(mostrarFormulario || productoEnEdicion !== null) && (
+        <div
+          role="presentation"
+          onClick={(evento) => {
+            if (evento.target === evento.currentTarget) {
+              cerrarFormulario()
+            }
+          }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+            overflowY: 'auto',
+            background: 'rgba(15, 23, 42, 0.55)',
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="titulo-formulario-producto"
+            style={{
+              width: '100%',
+              maxWidth: 680,
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              padding: 24,
+              borderRadius: 16,
+              background: '#fff',
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.25)',
+            }}
+          >
+            <FormularioProducto
+              producto={productoEnEdicion}
+              onCancelar={cerrarFormulario}
+              onGuardado={() => {
+                cerrarFormulario()
+                void cargarProductos()
+              }}
+            />
+          </div>
+        </div>
+      )}
     </main>
   )
 }

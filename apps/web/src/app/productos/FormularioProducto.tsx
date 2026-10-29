@@ -1,301 +1,404 @@
 
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 
-interface FormularioProductoProps {
-  onCerrar: () => void
+type Categoria = {
+  id: string
+  nombre: string
+  activo: boolean
 }
 
-interface DatosFormulario {
+type Unidad = {
+  id: string
+  codigo: string
+  nombre: string
+}
+
+type ProductoEditable = {
+  id: string
   nombre: string
   sku: string
   codigoBarras: string
-  categoria: string
   descripcion: string
-  precioCompra: string
-  precioVenta: string
-  unidad: string
-  stockMinimo: string
+  categoriaId: string
+  unidadId: string
+  precioCompra: number
+  precioVenta: number
+  stockMinimo: number
 }
 
-const formularioInicial: DatosFormulario = {
-  nombre: '',
-  sku: '',
-  codigoBarras: '',
-  categoria: '',
-  descripcion: '',
-  precioCompra: '',
-  precioVenta: '',
-  unidad: 'unidad',
-  stockMinimo: '0',
+type Props = {
+  onCancelar: () => void
+  onGuardado: () => void
+  producto?: ProductoEditable | null
+}
+
+type RespuestaLista<T> = T[] | { datos?: T[] }
+
+function obtenerLista<T>(respuesta: RespuestaLista<T>): T[] {
+  if (Array.isArray(respuesta)) return respuesta
+  return respuesta.datos ?? []
 }
 
 export default function FormularioProducto({
-  onCerrar,
-}: FormularioProductoProps) {
-  const [datos, setDatos] = useState<DatosFormulario>(formularioInicial)
+  onCancelar,
+  onGuardado,
+  producto = null,
+}: Props) {
+  const editando = producto !== null
+
+  const [categorias, setCategorias] = useState<Categoria[]>([])
+  const [unidades, setUnidades] = useState<Unidad[]>([])
+  const [cargandoDatos, setCargandoDatos] = useState(true)
+  const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState('')
 
-  function actualizar(
-    campo: keyof DatosFormulario,
-    valor: string,
+  const [formulario, setFormulario] = useState({
+    codigo: producto?.sku ?? '',
+    codigo_barras: producto?.codigoBarras ?? '',
+    nombre: producto?.nombre ?? '',
+    descripcion: producto?.descripcion ?? '',
+    categoria_id: producto?.categoriaId ?? '',
+    unidad_base_id: producto?.unidadId ?? '',
+    precio_compra:
+      producto !== null ? String(producto.precioCompra) : '',
+    precio_venta:
+      producto !== null ? String(producto.precioVenta) : '',
+    stock_minimo:
+      producto !== null ? String(producto.stockMinimo) : '0',
+  })
+
+  useEffect(() => {
+    let cancelado = false
+
+    async function cargarOpciones() {
+      setCargandoDatos(true)
+      setError('')
+
+      try {
+        const [respuestaCategorias, respuestaUnidades] =
+          await Promise.all([
+            fetch('/api/categorias', {
+              credentials: 'include',
+              cache: 'no-store',
+            }),
+            fetch('/api/unidades', {
+              credentials: 'include',
+              cache: 'no-store',
+            }),
+          ])
+
+        if (!respuestaCategorias.ok || !respuestaUnidades.ok) {
+          throw new Error(
+            'No se pudieron cargar las categorías o unidades.'
+          )
+        }
+
+        const datosCategorias =
+          (await respuestaCategorias.json()) as RespuestaLista<Categoria>
+
+        const datosUnidades =
+          (await respuestaUnidades.json()) as RespuestaLista<Unidad>
+
+        if (cancelado) return
+
+        const listaCategorias = obtenerLista(datosCategorias)
+        const listaUnidades = obtenerLista(datosUnidades)
+
+        setCategorias(
+          listaCategorias.filter(
+            (categoria) =>
+              categoria.activo || categoria.id === producto?.categoriaId
+          )
+        )
+        setUnidades(listaUnidades)
+
+        setFormulario({
+          codigo: producto?.sku ?? '',
+          codigo_barras: producto?.codigoBarras ?? '',
+          nombre: producto?.nombre ?? '',
+          descripcion: producto?.descripcion ?? '',
+          categoria_id:
+            producto?.categoriaId ??
+            listaCategorias.find((categoria) => categoria.activo)?.id ??
+            '',
+          unidad_base_id:
+            producto?.unidadId ?? listaUnidades[0]?.id ?? '',
+          precio_compra:
+            producto !== null ? String(producto.precioCompra) : '',
+          precio_venta:
+            producto !== null ? String(producto.precioVenta) : '',
+          stock_minimo:
+            producto !== null ? String(producto.stockMinimo) : '0',
+        })
+      } catch (err) {
+        if (!cancelado) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'Error al cargar los datos del formulario.'
+          )
+        }
+      } finally {
+        if (!cancelado) setCargandoDatos(false)
+      }
+    }
+
+    void cargarOpciones()
+
+    return () => {
+      cancelado = true
+    }
+  }, [producto])
+
+  function cambiarCampo(
+    campo: keyof typeof formulario,
+    valor: string
   ) {
-    setDatos((actuales) => ({ ...actuales, [campo]: valor }))
-    setError('')
+    setFormulario((actual) => ({
+      ...actual,
+      [campo]: valor,
+    }))
   }
 
-  function manejarEnvio(evento: React.FormEvent<HTMLFormElement>) {
+  async function guardarProducto(evento: FormEvent<HTMLFormElement>) {
     evento.preventDefault()
+    setError('')
 
-    if (!datos.nombre.trim() || !datos.sku.trim() || !datos.categoria) {
-      setError('Completa el nombre, el SKU y la categoría.')
+    if (!formulario.categoria_id || !formulario.unidad_base_id) {
+      setError('Selecciona una categoría y una unidad base.')
       return
     }
 
-    const compra = Number(datos.precioCompra)
-    const venta = Number(datos.precioVenta)
-    const minimo = Number(datos.stockMinimo)
+    const precioCompra = Number(formulario.precio_compra)
+    const precioVenta = Number(formulario.precio_venta)
+    const stockMinimo = Number(formulario.stock_minimo)
 
     if (
-      datos.precioCompra === '' ||
-      datos.precioVenta === '' ||
-      !Number.isFinite(compra) ||
-      !Number.isFinite(venta) ||
-      compra < 0 ||
-      venta < 0
+      formulario.precio_compra.trim() === '' ||
+      formulario.precio_venta.trim() === '' ||
+      !Number.isFinite(precioCompra) ||
+      !Number.isFinite(precioVenta) ||
+      !Number.isFinite(stockMinimo) ||
+      precioCompra < 0 ||
+      precioVenta < 0 ||
+      stockMinimo < 0
     ) {
-      setError('Ingresa precios válidos. No pueden ser negativos.')
+      setError(
+        'Los precios y el stock mínimo deben ser válidos y no negativos.'
+      )
       return
     }
 
-    if (
-      datos.stockMinimo === '' ||
-      !Number.isFinite(minimo) ||
-      minimo < 0
-    ) {
-      setError('Ingresa un stock mínimo válido.')
-      return
-    }
+    setGuardando(true)
 
-    window.alert(
-      'Formulario validado correctamente. El guardado real se implementará al conectar el backend.',
-    )
-    onCerrar()
+    try {
+      const url = editando
+        ? `/api/productos/${producto.id}`
+        : '/api/productos'
+
+      const respuesta = await fetch(url, {
+        method: editando ? 'PATCH' : 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          codigo: formulario.codigo.trim(),
+          codigo_barras: formulario.codigo_barras.trim() || null,
+          nombre: formulario.nombre.trim(),
+          descripcion: formulario.descripcion.trim() || null,
+          categoria_id: formulario.categoria_id,
+          unidad_base_id: formulario.unidad_base_id,
+          precio_compra: precioCompra,
+          precio_venta: precioVenta,
+          stock_minimo: stockMinimo,
+        }),
+      })
+
+      const resultado = await respuesta.json().catch(() => ({}))
+
+      if (!respuesta.ok) {
+        throw new Error(
+          resultado.error ||
+            resultado.mensaje ||
+            `No se pudo ${editando ? 'actualizar' : 'guardar'} el producto.`
+        )
+      }
+
+      onGuardado()
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Ocurrió un error al guardar el producto.'
+      )
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  if (cargandoDatos) {
+    return <p>Cargando categorías y unidades...</p>
   }
 
   return (
-    <div
-      className="producto-modal-fondo"
-      onMouseDown={(evento) => {
-        if (evento.target === evento.currentTarget) onCerrar()
-      }}
-    >
-      <section
-        className="producto-formulario-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="producto-formulario-titulo"
-      >
-        <header className="producto-formulario-cabecera">
-          <div>
-            <span className="productos-migaja">Inventario / Productos</span>
-            <h2 id="producto-formulario-titulo">Nuevo producto</h2>
-            <p>Completa la información del producto que deseas registrar.</p>
-          </div>
+    <form onSubmit={guardarProducto} className="formulario-producto">
+      <h2>
+        {editando ? 'Editar producto' : 'Nuevo producto'}
+      </h2>
 
-          <button
-            type="button"
-            className="producto-modal-cerrar"
-            onClick={onCerrar}
-            aria-label="Cerrar formulario"
-          >
-            ×
-          </button>
-        </header>
+      {error && (
+        <p role="alert" style={{ color: '#b42318' }}>
+          {error}
+        </p>
+      )}
 
-        <form onSubmit={manejarEnvio}>
-          <div className="producto-formulario-contenido">
-            <section className="producto-formulario-seccion">
-              <h3>Información básica</h3>
-              <p>Identifica el producto dentro del inventario.</p>
+      <label>
+        Nombre *
+        <input
+          required
+          value={formulario.nombre}
+          onChange={(e) => cambiarCampo('nombre', e.target.value)}
+          maxLength={150}
+        />
+      </label>
 
-              <div className="producto-formulario-grid">
-                <label className="producto-campo producto-campo-completo">
-                  Nombre del producto *
-                  <input
-                    autoFocus
-                    value={datos.nombre}
-                    onChange={(e) => actualizar('nombre', e.target.value)}
-                    placeholder="Ej. Cemento gris de 50 kg"
-                    maxLength={150}
-                    required
-                  />
-                </label>
+      <label>
+        Código interno *
+        <input
+          required
+          value={formulario.codigo}
+          onChange={(e) => cambiarCampo('codigo', e.target.value)}
+          maxLength={80}
+        />
+      </label>
 
-                <label className="producto-campo">
-                  SKU / Código interno *
-                  <input
-                    value={datos.sku}
-                    onChange={(e) => actualizar('sku', e.target.value)}
-                    placeholder="Ej. CEM-001"
-                    maxLength={60}
-                    required
-                  />
-                </label>
+      <label>
+        Código de barras
+        <input
+          value={formulario.codigo_barras}
+          onChange={(e) =>
+            cambiarCampo('codigo_barras', e.target.value)
+          }
+          maxLength={100}
+        />
+      </label>
 
-                <label className="producto-campo">
-                  Código de barras
-                  <input
-                    value={datos.codigoBarras}
-                    onChange={(e) => actualizar('codigoBarras', e.target.value)}
-                    placeholder="Código de barras"
-                    maxLength={100}
-                  />
-                </label>
+      <label>
+        Categoría *
+        <select
+          required
+          value={formulario.categoria_id}
+          onChange={(e) =>
+            cambiarCampo('categoria_id', e.target.value)
+          }
+        >
+          <option value="">Selecciona una categoría</option>
+          {categorias.map((categoria) => (
+            <option key={categoria.id} value={categoria.id}>
+              {categoria.nombre}
+            </option>
+          ))}
+        </select>
+      </label>
 
-                <label className="producto-campo producto-campo-completo">
-                  Descripción
-                  <textarea
-                    value={datos.descripcion}
-                    onChange={(e) => actualizar('descripcion', e.target.value)}
-                    placeholder="Características u observaciones del producto"
-                    rows={3}
-                    maxLength={1000}
-                  />
-                </label>
-              </div>
-            </section>
+      <label>
+        Unidad base *
+        <select
+          required
+          value={formulario.unidad_base_id}
+          onChange={(e) =>
+            cambiarCampo('unidad_base_id', e.target.value)
+          }
+        >
+          <option value="">Selecciona una unidad</option>
+          {unidades.map((unidad) => (
+            <option key={unidad.id} value={unidad.id}>
+              {unidad.nombre} ({unidad.codigo})
+            </option>
+          ))}
+        </select>
+      </label>
 
-            <section className="producto-formulario-seccion">
-              <h3>Clasificación</h3>
-              <p>Organiza el producto para facilitar su búsqueda.</p>
+      <label>
+        Precio de compra *
+        <input
+          required
+          type="number"
+          min="0"
+          step="0.01"
+          value={formulario.precio_compra}
+          onChange={(e) =>
+            cambiarCampo('precio_compra', e.target.value)
+          }
+        />
+      </label>
 
-              <div className="producto-formulario-grid">
-                <label className="producto-campo producto-campo-completo">
-                  Categoría *
-                  <select
-                    value={datos.categoria}
-                    onChange={(e) => actualizar('categoria', e.target.value)}
-                    required
-                  >
-                    <option value="">Selecciona una categoría</option>
-                    <option value="Construcción">Construcción</option>
-                    <option value="Tornillería">Tornillería</option>
-                    <option value="Pinturas">Pinturas</option>
-                    <option value="Electricidad">Electricidad</option>
-                    <option value="Herramientas">Herramientas</option>
-                    <option value="Plomería">Plomería</option>
-                    <option value="Otra">Otra</option>
-                  </select>
-                  <small>Estas opciones son temporales; luego vendrán de Categorías.</small>
-                </label>
-              </div>
-            </section>
+      <label>
+        Precio de venta *
+        <input
+          required
+          type="number"
+          min="0"
+          step="0.01"
+          value={formulario.precio_venta}
+          onChange={(e) =>
+            cambiarCampo('precio_venta', e.target.value)
+          }
+        />
+      </label>
 
-            <section className="producto-formulario-seccion">
-              <h3>Precios y unidad de medida</h3>
-              <p>Define los valores y cómo se contabiliza el producto.</p>
+      <label>
+        Stock mínimo *
+        <input
+          required
+          type="number"
+          min="0"
+          step="0.001"
+          value={formulario.stock_minimo}
+          onChange={(e) =>
+            cambiarCampo('stock_minimo', e.target.value)
+          }
+        />
+      </label>
 
-              <div className="producto-formulario-grid">
-                <label className="producto-campo">
-                  Precio de compra (COP) *
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={datos.precioCompra}
-                    onChange={(e) => actualizar('precioCompra', e.target.value)}
-                    placeholder="0"
-                    required
-                  />
-                </label>
+      <label>
+        Descripción
+        <textarea
+          value={formulario.descripcion}
+          onChange={(e) =>
+            cambiarCampo('descripcion', e.target.value)
+          }
+          rows={3}
+        />
+      </label>
 
-                <label className="producto-campo">
-                  Precio de venta (COP) *
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={datos.precioVenta}
-                    onChange={(e) => actualizar('precioVenta', e.target.value)}
-                    placeholder="0"
-                    required
-                  />
-                </label>
+      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+        <button
+          type="button"
+          onClick={onCancelar}
+          disabled={guardando}
+        >
+          Cancelar
+        </button>
 
-                <label className="producto-campo">
-                  Unidad de medida *
-                  <select
-                    value={datos.unidad}
-                    onChange={(e) => actualizar('unidad', e.target.value)}
-                    required
-                  >
-                    <option value="unidad">Unidad</option>
-                    <option value="metro">Metro</option>
-                    <option value="centimetro">Centímetro</option>
-                    <option value="kilogramo">Kilogramo</option>
-                    <option value="gramo">Gramo</option>
-                    <option value="litro">Litro</option>
-                    <option value="mililitro">Mililitro</option>
-                    <option value="bulto">Bulto</option>
-                    <option value="galon">Galón</option>
-                    <option value="rollo">Rollo</option>
-                    <option value="caja">Caja</option>
-                  </select>
-                </label>
-
-                <label className="producto-campo">
-                  Stock mínimo *
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.001"
-                    value={datos.stockMinimo}
-                    onChange={(e) => actualizar('stockMinimo', e.target.value)}
-                    required
-                  />
-                  <small>Se usará para alertar cuando haya pocas existencias.</small>
-                </label>
-              </div>
-            </section>
-
-            <div className="producto-nota-stock">
-              <span aria-hidden="true">ⓘ</span>
-              <p>
-                <strong>Existencias iniciales:</strong> no se ingresan aquí.
-                Se registrarán mediante una entrada de inventario para conservar
-                la trazabilidad de los movimientos.
-              </p>
-            </div>
-
-            {error && (
-              <div className="producto-formulario-error" role="alert">
-                {error}
-              </div>
-            )}
-          </div>
-
-          <footer className="producto-formulario-pie">
-            <span>Los campos con * son obligatorios.</span>
-            <div>
-              <button
-                type="button"
-                className="productos-btn productos-btn-secundario"
-                onClick={onCerrar}
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                className="productos-btn productos-btn-primario"
-              >
-                Validar producto
-              </button>
-            </div>
-          </footer>
-        </form>
-      </section>
-    </div>
+        <button
+          type="submit"
+          disabled={
+            guardando ||
+            categorias.length === 0 ||
+            unidades.length === 0
+          }
+        >
+          {guardando
+            ? 'Guardando...'
+            : editando
+              ? 'Guardar cambios'
+              : 'Guardar producto'}
+        </button>
+      </div>
+    </form>
   )
 }
