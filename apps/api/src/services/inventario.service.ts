@@ -85,23 +85,34 @@ export async function registrarEntrada(datos: DatosEntrada) {
 
 
 export async function listarStockProductos(activo?: boolean) {
-  let consulta = getSupabaseClient()
-    .from('stock_productos')
-    .select('*')
-    .order('nombre', { ascending: true })
+  const TAMANO_PAGINA = 1000
+  const resultado: any[] = []
 
-  if (activo !== undefined) {
-    consulta = consulta.eq('activo', activo)
+  for (let desde = 0; ; desde += TAMANO_PAGINA) {
+    let consulta = getSupabaseClient()
+      .from('stock_productos')
+      .select('*')
+      .order('nombre', { ascending: true })
+      .order('producto_id', { ascending: true }) // desempate estable
+      .range(desde, desde + TAMANO_PAGINA - 1)
+
+    if (activo !== undefined) {
+      consulta = consulta.eq('activo', activo)
+    }
+
+    const { data, error } = await consulta
+
+    if (error) {
+      console.error('Error al consultar stock:', error)
+      throw new Error('No fue posible consultar el inventario')
+    }
+
+    resultado.push(...(data ?? []))
+
+    if (!data || data.length < TAMANO_PAGINA) break
   }
 
-  const { data, error } = await consulta
-
-  if (error) {
-    console.error('Error al consultar stock:', error)
-    throw new Error('No fue posible consultar el inventario')
-  }
-
-  return data
+  return resultado
 }
 
 

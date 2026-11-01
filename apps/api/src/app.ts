@@ -6,6 +6,8 @@ import { categoriasRouter } from './routes/categorias'
 import { productosRouter } from './routes/productos'
 import inventarioRouter from './routes/inventario'
 import { ventasRouter } from './routes/ventas'
+import unidadesRouter from './routes/unidades'
+import { facturasCompraRouter } from './routes/facturasCompra'
 
 export function crearApp(): Application {
   const app: Application = express()
@@ -20,6 +22,8 @@ export function crearApp(): Application {
   app.use('/productos', productosRouter)
   app.use('/inventario', inventarioRouter)
   app.use('/ventas', ventasRouter)
+  app.use("/unidades", unidadesRouter);
+  app.use('/facturas-compra', facturasCompraRouter)
 
   app.get('/', (_req, res) => {
     res.json({ ok: true, mensaje: 'API Ferretería funcionando correctamente' })

@@ -26,7 +26,7 @@ export default function LoginPage() {
         return;
       }
 
-      router.push('/');
+      router.push('/dashboard');
       router.refresh();
     } catch {
       setError('No se pudo conectar con el servidor.');
