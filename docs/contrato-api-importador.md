@@ -8,7 +8,7 @@ Contrato que usa el importador DIAN. Está tomado del código de la rama `feat/f
 | Tema | Regla |
 |---|---|
 | Formato | Todas las rutas reciben y responden JSON. |
-| Autenticación | Cookie de sesión `sesion=<JWT>`. Todas las rutas, salvo `POST /auth/login` y `POST /auth/logout`, la exigen. |
+| Autenticación | Cookie de sesión `sesion=<JWT>`. Todas las rutas, salvo las de `/auth`, la exigen. |
 | Sin sesión o sesión vencida | `401 { "error": "No autorizado" }` |
 | Ruta inexistente | `404 { "error": "Ruta no encontrada" }` |
 | Error inesperado | `500 { "error": "mensaje" }` |
@@ -38,8 +38,7 @@ Solicitud:
 
 | Código | Respuesta |
 |---|---|
-| 200 | `{ "autenticado": true }` |
-| 401 | `{ "error": "No autorizado" }` (no responde `autenticado: false`) |
+| 200 | `{ "autenticado": true }` con sesión válida, `{ "autenticado": false }` sin sesión o con sesión inválida o vencida. Nunca responde `401`. |
 
 ### `POST /auth/logout`
 
@@ -297,7 +296,8 @@ Solo incluye líneas con `estado_importacion = "importada"`, de la más reciente
 
 ## 5. Diferencias con el borrador inicial del contrato
 
-- `GET /auth/me` no devuelve `autenticado: false`: sin sesión responde `401`.
+La API se ajustó para que `GET /auth/me` devuelva `{ "autenticado": true|false }` como indicaba el borrador. Lo que sigue son detalles que el borrador no recogía:
+
 - `POST /auth/login` exitoso responde `{ "autenticado": true }`; los fallos son `400` (falta la contraseña) y `401` (contraseña incorrecta).
 - La normalización de duplicados quita **todos** los caracteres no alfanuméricos, no solo guiones y espacios.
 - El `409` incluye también el campo `error: "Esta factura ya fue importada"`.

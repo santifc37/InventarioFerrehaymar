@@ -30,10 +30,12 @@ async function consultarSesion(): Promise<EstadoSesion> {
       },
     })
 
-    if (res.ok) {
-      return { autenticado: true }
+    if (!res.ok) {
+      return { autenticado: false }
     }
-    return { autenticado: false }
+
+    const datos = await res.json()
+    return { autenticado: datos?.autenticado === true }
   } catch {
     return { autenticado: false }
   }

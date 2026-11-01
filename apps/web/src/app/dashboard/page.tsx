@@ -156,7 +156,7 @@ export default async function DashboardPage() {
 
   const sesion = await consultarApi('/auth/me', cookieSesion)
 
-  if (!sesion) redirect('/login')
+  if (!sesion?.autenticado) redirect('/login')
 
   const [respuestaProductos, respuestaStock, respuestaVentas, respuestaMovimientos] =
     await Promise.all([
